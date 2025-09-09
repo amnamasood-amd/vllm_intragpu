@@ -39,6 +39,8 @@ def _listen_for_register(poller, router_socket):
         socks = dict(poller.poll())
         if router_socket in socks:
             remote_address, message = router_socket.recv_multipart()
+            #print("remote_address: ",remote_address)
+            #print("message: ", message)
             # data: {"type": "P", "http_address": "ip:port",
             #        "zmq_address": "ip:port"}
             data = msgpack.loads(message)

@@ -38,14 +38,14 @@ wait_for_server() {
 launch_chunked_prefill() {
   model="meta-llama/Meta-Llama-3.1-8B-Instruct"
   # disagg prefill
-  CUDA_VISIBLE_DEVICES=0 python3 \
+  CUDA_VISIBLE_DEVICES=1 python3 \
     -m vllm.entrypoints.openai.api_server \
     --model $model \
     --port 8100 \
     --max-model-len 10000 \
     --enable-chunked-prefill \
     --gpu-memory-utilization 0.6 &
-  CUDA_VISIBLE_DEVICES=1 python3 \
+  CUDA_VISIBLE_DEVICES=2 python3 \
     -m vllm.entrypoints.openai.api_server \
     --model $model \
     --port 8200 \
@@ -62,7 +62,7 @@ launch_chunked_prefill() {
 launch_disagg_prefill() {
   model="meta-llama/Meta-Llama-3.1-8B-Instruct"
   # disagg prefill
-  CUDA_VISIBLE_DEVICES=0 python3 \
+  CUDA_VISIBLE_DEVICES=1 python3 \
     -m vllm.entrypoints.openai.api_server \
     --model $model \
     --port 8100 \
@@ -71,7 +71,7 @@ launch_disagg_prefill() {
     --kv-transfer-config \
     '{"kv_connector":"P2pNcclConnector","kv_role":"kv_producer","kv_rank":0,"kv_parallel_size":2,"kv_buffer_size":5e9}' &
 
-  CUDA_VISIBLE_DEVICES=1 python3 \
+  CUDA_VISIBLE_DEVICES=2 python3 \
     -m vllm.entrypoints.openai.api_server \
     --model $model \
     --port 8200 \
@@ -120,12 +120,12 @@ benchmark() {
 
 main() {
 
-  (which wget && which curl) || (apt-get update && apt-get install -y wget curl)
-  (which jq) || (apt-get -y install jq)
-  (which socat) || (apt-get -y install socat)
-  (which lsof) || (apt-get -y install lsof)
+  #(which wget && which curl) || (apt-get update && apt-get install -y wget curl)
+  #(which jq) || (apt-get -y install jq)
+  #(which socat) || (apt-get -y install socat)
+  #(which lsof) || (apt-get -y install lsof)
 
-  pip install quart httpx matplotlib aiohttp datasets
+  #pip install quart httpx matplotlib aiohttp datasets
 
   cd "$(dirname "$0")"
 
@@ -145,11 +145,11 @@ main() {
 
   export VLLM_HOST_IP=$(hostname -I | awk '{print $1}')
 
-  launch_chunked_prefill
-  for qps in 2 4 6 8; do
-  benchmark $qps $default_output_len chunked_prefill
-  done
-  kill_gpu_processes
+  #launch_chunked_prefill
+  #for qps in 2 4 6 8; do
+  #benchmark $qps $default_output_len chunked_prefill
+  #done
+  #kill_gpu_processes
 
   launch_disagg_prefill
   for qps in 2 4 6 8; do

@@ -262,7 +262,8 @@ async def benchmark(
         input_requests[0].expected_output_len,
         input_requests[0].multi_modal_data,
     )
-
+    print("test_prompt: ", test_prompt)
+    print("test_prompt_len: ",test_prompt_len)
     assert (
         test_mm_content is None
         or isinstance(test_mm_content, dict)

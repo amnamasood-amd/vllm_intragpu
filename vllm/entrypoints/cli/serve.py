@@ -41,12 +41,15 @@ class ServeSubcommand(CLISubcommand):
             args.model = args.model_tag
 
         if args.headless or args.api_server_count < 1:
+            print("running headless")
             run_headless(args)
         else:
             if args.api_server_count > 1:
+                print("running multi_api")
                 run_multi_api_server(args)
             else:
                 # Single API server (this process).
+                print("running single")
                 uvloop.run(run_server(args))
 
     def validate(self, args: argparse.Namespace) -> None:
