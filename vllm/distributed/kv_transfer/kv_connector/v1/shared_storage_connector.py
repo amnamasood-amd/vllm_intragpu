@@ -85,7 +85,7 @@ class SharedStorageConnector(KVConnectorBase_V1):
         self._requests_need_load: dict[str, Request] = {}
         transfer_config = vllm_config.kv_transfer_config
         self._storage_path = transfer_config.get_from_extra_config(
-            "shared_storage_path", "/tmp")
+            "shared_storage_path", "./tmpstorage")
         logger.info(vllm_config.kv_transfer_config)
         logger.info("Shared storage path is %s", self._storage_path)
 

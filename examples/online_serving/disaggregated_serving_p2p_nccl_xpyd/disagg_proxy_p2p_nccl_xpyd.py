@@ -48,6 +48,7 @@ def _listen_for_register(poller, router_socket):
                 global prefill_instances
                 global prefill_cv
                 with prefill_cv:
+                    #print("registering prefill instance")
                     node = prefill_instances.get(data["http_address"], None)
                     prefill_instances[data["http_address"]] = (
                         data["zmq_address"],
@@ -59,6 +60,7 @@ def _listen_for_register(poller, router_socket):
                 global decode_instances
                 global decode_cv
                 with decode_cv:
+                    #print("registering decode instance")
                     node = decode_instances.get(data["http_address"], None)
                     decode_instances[data["http_address"]] = (
                         data["zmq_address"],

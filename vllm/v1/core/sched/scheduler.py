@@ -1064,6 +1064,8 @@ class Scheduler(SchedulerInterface):
         return len(self.running), len(self.waiting)
 
     def add_request(self, request: Request) -> None:
+        logger.info("adding request in scheduler")
+        print("max tokens ", request.max_tokens)
         self.waiting.add_request(request)
         self.requests[request.request_id] = request
         if self.log_stats:

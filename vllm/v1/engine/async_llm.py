@@ -301,7 +301,7 @@ class AsyncLLM(EngineClient):
                            prompt: Optional[str],
                            parent_req: Optional[ParentRequest], index: int,
                            queue: RequestOutputCollector):
-
+        logger.info("in AsyncLLM _add_request")
         # Add the request to OutputProcessor (this process).
         self.output_processor.add_request(request, prompt, parent_req, index,
                                           queue)

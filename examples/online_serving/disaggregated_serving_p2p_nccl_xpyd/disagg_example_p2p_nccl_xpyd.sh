@@ -26,8 +26,8 @@ TIMEOUT_SECONDS=${TIMEOUT_SECONDS:-1200}
 PROXY_PORT=${PROXY_PORT:-30001}
 
 # Default 1P3D configuration (1 Prefill + 3 Decode)
-PREFILL_GPUS=${PREFILL_GPUS:-0}
-DECODE_GPUS=${DECODE_GPUS:-1}
+PREFILL_GPUS=${PREFILL_GPUS:-4}
+DECODE_GPUS=${DECODE_GPUS:-5}
 PREFILL_PORTS=${PREFILL_PORTS:-20003}
 DECODE_PORTS=${DECODE_PORTS:-20005}
 
@@ -177,7 +177,7 @@ main() {
         --max-num-batched-tokens 10000 \
         --max-num-seqs 256 \
         --trust-remote-code \
-        --gpu-memory-utilization 0.9 \
+        --gpu-memory-utilization 0.4 \
         --kv-transfer-config \
         "{\"kv_connector\":\"P2pNcclConnector\",\"kv_role\":\"kv_producer\",\"kv_buffer_size\":\"1e1\",\"kv_port\":\"$kv_port\",\"kv_connector_extra_config\":{\"proxy_ip\":\"0.0.0.0\",\"proxy_port\":\"$PROXY_PORT\",\"http_port\":\"$port\",\"send_type\":\"PUT_ASYNC\",\"nccl_num_channels\":\"16\"}}" > prefill$((i+1)).log &
         PIDS+=($!)
@@ -205,7 +205,7 @@ main() {
         --max-num-batched-tokens 10000 \
         --max-num-seqs 256 \
         --trust-remote-code \
-        --gpu-memory-utilization 0.7 \
+        --gpu-memory-utilization 0.4 \
         --kv-transfer-config \
         "{\"kv_connector\":\"P2pNcclConnector\",\"kv_role\":\"kv_consumer\",\"kv_buffer_size\":\"8e9\",\"kv_port\":\"$kv_port\",\"kv_connector_extra_config\":{\"proxy_ip\":\"0.0.0.0\",\"proxy_port\":\"$PROXY_PORT\",\"http_port\":\"$port\",\"send_type\":\"PUT_ASYNC\",\"nccl_num_channels\":\"16\"}}" > decode$((i+1)).log &
         PIDS+=($!)
