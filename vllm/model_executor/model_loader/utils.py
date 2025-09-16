@@ -60,6 +60,7 @@ def initialize_model(
         with set_current_vllm_config(vllm_config,
                                      check_compile=True,
                                      prefix=prefix):
+            logger.info("initialized model")
             return model_class(vllm_config=vllm_config, prefix=prefix)
 
     msg = ("vLLM model class should accept `vllm_config` and `prefix` as "
@@ -87,6 +88,7 @@ def initialize_model(
         kwargs["lora_config"] = vllm_config.lora_config
     if "scheduler_config" in all_params:
         kwargs["scheduler_config"] = vllm_config.scheduler_config
+    logger.info("done initializing model")
     with set_current_vllm_config(vllm_config,
                                  check_compile=True,
                                  prefix=prefix):
@@ -275,3 +277,35 @@ def configure_quant_config(quant_config: QuantizationConfig,
             quant_config.apply_vllm_mapper(hf_to_vllm_mapper)
         if packed_mapping is not None:
             quant_config.packed_modules_mapping = packed_mapping
+
+def send_tensor_with_untyped_storage(tensor, specs) -> None:
+    storage = tensor.untyped_storage()
+    (
+            storage_device,
+            storage_handle,
+            storage_size_bytes,
+            storage_offset_bytes,
+            ref_counter_handle,
+            ref_counter_offset,
+            event_handle,
+            event_sync_required,
+    ) = storage._share_cuda_()
+    specs.append(
+            {
+                "tensor_cls": type(tensor),
+                "tensor_size": tensor.shape,
+                "tensor_stride": tensor.stride(),
+                "tensor_offset": tensor.storage_offset(),
+                "dtype": tensor.dtype,
+                "requires_grad": tensor.requires_grad,
+                "storage_cls": type(storage),
+                "storage_device": storage_device,
+                "storage_handle": storage_handle,
+                "storage_size_bytes": storage_size_bytes,
+                "storage_offset_bytes": storage_offset_bytes,
+                "ref_counter_handle": ref_counter_handle,
+                "ref_counter_offset": ref_counter_offset,
+                "event_handle": event_handle,
+                "event_sync_required": event_sync_required,
+            }
+    )

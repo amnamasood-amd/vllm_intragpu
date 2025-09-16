@@ -53,13 +53,13 @@ def parse_args():
     parser.add_argument(
         "--prefill-url",
         type=str,
-        default="http://localhost:20003/v1/completions",
+        default="http://localhost:50003/v1/completions",
         help="Prefill service endpoint URL",
     )
     parser.add_argument(
         "--decode-url",
         type=str,
-        default="http://localhost:20005/v1/completions",
+        default="http://localhost:50005/v1/completions",
         help="Decode service endpoint URL",
     )
 

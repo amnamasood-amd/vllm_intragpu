@@ -128,6 +128,7 @@ class EngineCore:
             > 1,
             log_stats=self.log_stats,
         )
+
         self.use_spec_decode = vllm_config.speculative_config is not None
 
         self.mm_registry = mm_registry = MULTIMODAL_REGISTRY
@@ -289,6 +290,8 @@ class EngineCore:
         if not self.scheduler.has_requests():
             return {}, False
         scheduler_output = self.scheduler.schedule()
+        logger.info("in core calling execute model and checking connector")
+        print(scheduler_output.kv_connector_metadata)
         model_output = self.execute_model_with_error_logging(
             self.model_executor.execute_model,  # type: ignore
             scheduler_output)

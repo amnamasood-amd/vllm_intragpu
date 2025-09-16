@@ -154,6 +154,46 @@ main() {
     IFS=',' read -ra DECODE_GPU_ARRAY <<< "$DECODE_GPUS"
     IFS=',' read -ra PREFILL_PORT_ARRAY <<< "$PREFILL_PORTS"
     IFS=',' read -ra DECODE_PORT_ARRAY <<< "$DECODE_PORTS"
+    
+    echo ""
+
+    echo "Starting ${#DECODE_GPU_ARRAY[@]} decode server(s)..."
+    for i in "${!DECODE_GPU_ARRAY[@]}"; do
+        local gpu_id=${DECODE_GPU_ARRAY[$i]}
+        local port=${DECODE_PORT_ARRAY[$i]}
+        local kv_port=$((22001 + i))
+
+        echo "  Decode server $((i+1)): GPU $gpu_id, Port $port, KV Port $kv_port"
+        VLLM_USE_V1=1 CUDA_VISIBLE_DEVICES=$gpu_id vllm serve $MODEL \
+        --enforce-eager \
+        --host 0.0.0.0 \
+        --port $port \
+        --tensor-parallel-size 1 \
+        --seed 1024 \
+        --dtype float16 \
+        --max-model-len 8192 \
+        --max-num-batched-tokens 10000 \
+        --max-num-seqs 256 \
+        --trust-remote-code \
+        --gpu-memory-utilization 0.90 \
+        --kv-transfer-config \
+        "{\"kv_connector\":\"IntraGPUConnector\",\"kv_role\":\"kv_producer\",\"kv_buffer_size\":\"8e9\",\"kv_port\":\"$kv_port\"}" > decode$((i+1)).log &
+        PIDS+=($!)
+        #"{\"kv_connector\":\"P2pNcclConnector\",\"kv_role\":\"kv_consumer\",\"kv_buffer_size\":\"8e9\",\"kv_port\":\"$kv_port\",\"kv_connector_extra_config\":{\"proxy_ip\":\"0.0.0.0\",\"proxy_port\":\"$PROXY_PORT\",\"http_port\":\"$port\",\"send_type\":\"PUT_ASYNC\",\"nccl_num_channels\":\"16\"}}" > decode$((i+1)).log
+    done
+
+    # =============================================================================
+    # Wait for All Servers to Start
+    # =============================================================================
+    echo ""
+    echo "Waiting for decode servers to start..."
+    for port in "${DECODE_PORT_ARRAY[@]}"; do
+        if ! wait_for_server $port; then
+            echo "Failed to start server on port $port"
+            cleanup
+            exit 1
+        fi
+    done
 
     # =============================================================================
     # Launch Prefill Servers (X Producers)
@@ -179,7 +219,7 @@ main() {
         --trust-remote-code \
         --gpu-memory-utilization 0.90 \
         --kv-transfer-config \
-        "{\"kv_connector\":\"IntraGPUConnector\",\"kv_role\":\"kv_producer\",\"kv_buffer_size\":\"1e1\",\"kv_port\":\"$kv_port\"}" > prefill$((i+1)).log &
+        "{\"kv_connector\":\"IntraGPUConnector\",\"kv_role\":\"kv_consumer\",\"kv_buffer_size\":\"1e1\",\"kv_port\":\"$kv_port\"}" > prefill$((i+1)).log &
         PIDS+=($!)
         #"{\"kv_connector\":\"P2pNcclConnector\",\"kv_role\":\"kv_producer\",\"kv_buffer_size\":\"1e1\",\"kv_port\":\"$kv_port\",\"kv_connector_extra_config\":{\"proxy_ip\":\"0.0.0.0\",\"proxy_port\":\"$PROXY_PORT\",\"http_port\":\"$port\",\"send_type\":\"PUT_ASYNC\",\"nccl_num_channels\":\"16\"}}" > prefill$((i+1)).log &
     done
@@ -196,47 +236,11 @@ main() {
     # =============================================================================
     # Launch Decode Servers (Y Decoders)
     # =============================================================================
-    echo ""
-
-    echo "Starting ${#DECODE_GPU_ARRAY[@]} decode server(s)..."
-    for i in "${!DECODE_GPU_ARRAY[@]}"; do
-        local gpu_id=${DECODE_GPU_ARRAY[$i]}
-        local port=${DECODE_PORT_ARRAY[$i]}
-        local kv_port=$((22001 + i))
-
-        echo "  Decode server $((i+1)): GPU $gpu_id, Port $port, KV Port $kv_port"
-        VLLM_USE_V1=1 CUDA_VISIBLE_DEVICES=$gpu_id vllm serve $MODEL \
-        --enforce-eager \
-        --host 0.0.0.0 \
-        --port $port \
-        --tensor-parallel-size 1 \
-        --seed 1024 \
-        --dtype float16 \
-        --max-model-len 8192 \
-        --max-num-batched-tokens 10000 \
-        --max-num-seqs 256 \
-        --trust-remote-code \
-        --gpu-memory-utilization 0.90 \
-        --kv-transfer-config \
-        "{\"kv_connector\":\"IntraGPUConnector\",\"kv_role\":\"kv_consumer\",\"kv_buffer_size\":\"8e9\",\"kv_port\":\"$kv_port\"}" > decode$((i+1)).log &
-        PIDS+=($!)
-        #"{\"kv_connector\":\"P2pNcclConnector\",\"kv_role\":\"kv_consumer\",\"kv_buffer_size\":\"8e9\",\"kv_port\":\"$kv_port\",\"kv_connector_extra_config\":{\"proxy_ip\":\"0.0.0.0\",\"proxy_port\":\"$PROXY_PORT\",\"http_port\":\"$port\",\"send_type\":\"PUT_ASYNC\",\"nccl_num_channels\":\"16\"}}" > decode$((i+1)).log
-    done
+    
 
     
 
-    # =============================================================================
-    # Wait for All Servers to Start
-    # =============================================================================
-    echo ""
-    echo "Waiting for decode servers to start..."
-    for port in "${DECODE_PORT_ARRAY[@]}"; do
-        if ! wait_for_server $port; then
-            echo "Failed to start server on port $port"
-            cleanup
-            exit 1
-        fi
-    done
+    
 
     echo ""
     echo "All servers are up. Starting benchmark..."
@@ -254,13 +258,13 @@ main() {
     # =============================================================================
     # Run Benchmark
     # =============================================================================
-    cd ../../../benchmarks/
-    vllm bench serve --port $PROXY_PORT --seed $(date +%s) \
-        --model $MODEL \
-        --dataset-name random --random-input-len 7500 --random-output-len 200 \
-        --num-prompts 100 --burstiness 100 --request-rate 100 | tee benchmark.log
+    #cd ../../../benchmarks/
+    #vllm bench serve --port $PROXY_PORT --seed $(date +%s) \
+    #    --model $MODEL \
+    #    --dataset-name random --random-input-len 7500 --random-output-len 200 \
+    #    --num-prompts 100 --burstiness 100 --request-rate 100 | tee benchmark.log
     
-    echo "Benchmarking done. Cleaning up..."
+    #echo "Benchmarking done. Cleaning up..."
 
     #output1=$(curl -X POST -s http://localhost:30001/v1/completions \
     #-H "Content-Type: application/json" \
@@ -270,7 +274,7 @@ main() {
     #"max_tokens": 10,
     #"temperature": 0
     #}')
-    #python3 single_serve.py --port $PROXY_PORT --model $MODEL
+    python3 single_serve.py --port $PROXY_PORT --model $MODEL
     cleanup
 
     #echo $output1

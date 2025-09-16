@@ -91,7 +91,7 @@ async def main_async(args: argparse.Namespace) -> str:
         timeout=aiohttp.ClientTimeout(total=6 * 60 * 60),
     )
 
-    test_prompt="San Francisco is a "
+    test_prompt=50*"San Francisco is a "
     test_prompt_len = len(test_prompt)
     test_output_len = 10
 

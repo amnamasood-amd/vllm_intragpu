@@ -3990,6 +3990,7 @@ def set_current_vllm_config(vllm_config: VllmConfig,
         _current_prefix = old_prefix
         # Clear the compilation config cache when context changes
         get_cached_compilation_config.cache_clear()
+    logger.info("set current vllm config")
 
 
 @lru_cache(maxsize=1)

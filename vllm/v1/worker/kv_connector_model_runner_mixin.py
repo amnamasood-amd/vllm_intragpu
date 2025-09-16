@@ -90,7 +90,8 @@ class KVConnectorModelRunnerMixin:
         wait_for_save: bool = True
     ) -> Generator[KVConnectorOutput, None, None]:
         output = KVConnectorOutput()
-
+        logger.info("in _get_kv_connector_output")
+        #print(wait_for_save)
         # Update KVConnector with the KVConnector metadata forward().
         kv_connector = get_kv_transfer_group()
         assert isinstance(kv_connector, KVConnectorBase)
@@ -113,3 +114,4 @@ class KVConnectorModelRunnerMixin:
                 kv_connector.get_finished(scheduler_output.finished_req_ids))
 
             kv_connector.clear_connector_metadata()
+            logger.info("finished _get_kv_connector_output")

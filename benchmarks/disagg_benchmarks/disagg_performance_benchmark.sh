@@ -36,24 +36,25 @@ wait_for_server() {
 
 
 launch_chunked_prefill() {
-  model="meta-llama/Meta-Llama-3.1-8B-Instruct"
+  model="meta-llama/Meta-Llama-3.1-70B-Instruct"
   # disagg prefill
-  CUDA_VISIBLE_DEVICES=1 python3 \
+  python3 \
     -m vllm.entrypoints.openai.api_server \
     --model $model \
     --port 8100 \
     --max-model-len 10000 \
     --enable-chunked-prefill \
+    --tensor-parallel-size 8 \
     --gpu-memory-utilization 0.6 &
-  CUDA_VISIBLE_DEVICES=2 python3 \
-    -m vllm.entrypoints.openai.api_server \
-    --model $model \
-    --port 8200 \
-    --max-model-len 10000 \
-    --enable-chunked-prefill \
-    --gpu-memory-utilization 0.6 &
+  #CUDA_VISIBLE_DEVICES=2 python3 \
+  #  -m vllm.entrypoints.openai.api_server \
+  #  --model $model \
+  #  --port 8200 \
+  #  --max-model-len 10000 \
+  #  --enable-chunked-prefill \
+  #  --gpu-memory-utilization 0.6 &
   wait_for_server 8100
-  wait_for_server 8200
+  #wait_for_server 8200
   python3 round_robin_proxy.py &
   sleep 1
 }
@@ -89,16 +90,31 @@ launch_disagg_prefill() {
 
 benchmark() {
   results_folder="./results"
-  model="meta-llama/Meta-Llama-3.1-8B-Instruct"
+  model="meta-llama/Meta-Llama-3.1-70B-Instruct"
   dataset_name="sonnet"
   dataset_path="../sonnet_4x.txt"
-  num_prompts=100
+  num_prompts=1024
   qps=$1
   prefix_len=50
   input_len=1024
   output_len=$2
   tag=$3
 
+  vllm bench serve \
+    --backend vllm \
+    --model $model \
+    --dataset-name $dataset_name \
+    --dataset-path $dataset_path \
+    --random-input-len $input_len \
+    --random-output-len "$output_len" \
+    --num-prompts $num_prompts \
+    --port 8000 \
+    --save-result \
+    --result-dir $results_folder \
+    --result-filename "$tag"-qps-"$qps".json \
+    --request-rate "$qps"
+
+  """
   vllm bench serve \
     --backend vllm \
     --model $model \
@@ -113,6 +129,7 @@ benchmark() {
     --result-dir $results_folder \
     --result-filename "$tag"-qps-"$qps".json \
     --request-rate "$qps"
+  """
 
   sleep 2
 }
@@ -145,19 +162,19 @@ main() {
 
   export VLLM_HOST_IP=$(hostname -I | awk '{print $1}')
 
-  #launch_chunked_prefill
-  #for qps in 2 4 6 8; do
-  #benchmark $qps $default_output_len chunked_prefill
-  #done
-  #kill_gpu_processes
-
-  launch_disagg_prefill
+  launch_chunked_prefill
   for qps in 2 4 6 8; do
-  benchmark $qps $default_output_len disagg_prefill
+  benchmark $qps $default_output_len chunked_prefill
   done
   kill_gpu_processes
 
-  python3 visualize_benchmark_results.py
+  #launch_disagg_prefill
+  #for qps in 2 4 6 8; do
+  #benchmark $qps $default_output_len disagg_prefill
+  #done
+  #kill_gpu_processes
+
+  #python3 visualize_benchmark_results.py
 
 }
 

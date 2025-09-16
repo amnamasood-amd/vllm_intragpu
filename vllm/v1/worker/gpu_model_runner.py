@@ -97,6 +97,9 @@ if TYPE_CHECKING:
 else:
     xgr = LazyLoader("xgr", globals(), "xgrammar")
 
+from vllm.model_executor.model_loader.utils import send_tensor_with_untyped_storage
+import torch.multiprocessing as mp
+
 logger = init_logger(__name__)
 
 
@@ -1478,7 +1481,8 @@ class GPUModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
         (attn_metadata, logits_indices, spec_decode_metadata,
          num_scheduled_tokens_np, spec_decode_common_attn_metadata,
          max_query_len) = self._prepare_inputs(scheduler_output)
-
+        #logger.info("Printing attn_metadata")
+        #print(attn_metadata)
         num_scheduled_tokens = scheduler_output.total_num_scheduled_tokens
         if (self.compilation_config.cudagraph_mode != CUDAGraphMode.NONE
                 and not envs.VLLM_DISABLE_PAD_FOR_CUDAGRAPH
@@ -1919,6 +1923,12 @@ class GPUModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
         Args:
             eep_scale_up: the model loading is for elastic EP scale up.
         """
+        kv_connector=None
+        if has_kv_transfer_group():
+            logger.info("Model runner has KVTransfer group, initializing q")
+            kv_connector = get_kv_transfer_group()
+            kv_connector.initialize_gpu_manager()
+            
         logger.info("Starting to load model %s...", self.model_config.model)
         if eep_scale_up:
             from vllm.distributed.parallel_state import get_ep_group
@@ -1952,8 +1962,12 @@ class GPUModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
             time_before_load = time.perf_counter()
             model_loader = get_model_loader(self.load_config)
             logger.info("Loading model from scratch...")
-            self.model = model_loader.load_model(
-                vllm_config=self.vllm_config, model_config=self.model_config)
+            if kv_connector is not None:
+                self.model = model_loader.load_model(
+                    vllm_config=self.vllm_config, model_config=self.model_config, connector_role=kv_connector.transfer_config.kv_role, connector_q=kv_connector.qmgr.q)
+            else:
+                self.model = model_loader.load_model(
+                    vllm_config=self.vllm_config, model_config=self.model_config)
             if self.lora_config:
                 self.model = self.load_lora_model(self.model,
                                                   self.model_config,
@@ -2918,12 +2932,41 @@ class GPUModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
             corresponding memory buffer for KV cache.
          """
         kv_cache_raw_tensors: dict[str, torch.Tensor] = {}
-        for kv_cache_tensor in kv_cache_config.kv_cache_tensors:
-            tensor = torch.zeros(kv_cache_tensor.size,
-                                 dtype=torch.int8,
-                                 device=self.device)
-            for layer_name in kv_cache_tensor.shared_by:
-                kv_cache_raw_tensors[layer_name] = tensor
+        kv_connector=None
+        if has_kv_transfer_group():
+            logger.info("in allocate_kv_cache_tensors")
+            kv_connector = get_kv_transfer_group()
+            kvcache_list=[]
+            if kv_connector.transfer_config.kv_role == "kv_producer":
+                for kv_cache_tensor in kv_cache_config.kv_cache_tensors:
+                    tensor = torch.zeros(kv_cache_tensor.size,
+                                         dtype=torch.int8,
+                                         device=self.device)
+                    for layer_name in kv_cache_tensor.shared_by:
+                        kv_cache_raw_tensors[layer_name] = tensor
+                    send_tensor_with_untyped_storage(tensor, kvcache_list)
+                print(len(kvcache_list))
+                kv_connector.qmgr.q.put(kvcache_list)
+            else:
+                kvcache_list=kv_connector.qmgr.q.get()
+                print(len(kvcache_list))
+                kvcache_tensor_list=[]
+                for spec in kvcache_list:
+                    kvcache_tensor_list.append(mp.reductions.rebuild_cuda_tensor(**spec))
+                i=0
+                for kv_cache_tensor in kv_cache_config.kv_cache_tensors: 
+                    tensor = kvcache_tensor_list[i]
+                    i+=1
+                    for layer_name in kv_cache_tensor.shared_by:
+                        kv_cache_raw_tensors[layer_name] = tensor 
+                print(len(kv_cache_raw_tensors))           
+        else:
+            for kv_cache_tensor in kv_cache_config.kv_cache_tensors:
+                tensor = torch.zeros(kv_cache_tensor.size,
+                                     dtype=torch.int8,
+                                     device=self.device)
+                for layer_name in kv_cache_tensor.shared_by:
+                    kv_cache_raw_tensors[layer_name] = tensor
 
         layer_names = set()
         for group in kv_cache_config.kv_cache_groups:

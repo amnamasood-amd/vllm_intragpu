@@ -35,6 +35,14 @@ from vllm.v1.request import Request, RequestStatus
 from vllm.v1.spec_decode.metrics import SpecDecodingStats
 from vllm.v1.structured_output import StructuredOutputManager
 
+#from vllm.distributed.kv_transfer.kv_connector.v1.intragpu_manager import GPUManager, register_kvcachemanager
+from multiprocessing.managers import  BaseManager, SyncManager
+class GPUManager(SyncManager):
+    pass
+
+#def register_function(kvcachemanager):
+#    GPUManager.register("get_kvcachemanager",callable=lambda: kvcachemanager)
+
 logger = init_logger(__name__)
 
 
@@ -152,8 +160,7 @@ class Scheduler(SchedulerInterface):
             if speculative_config.use_eagle():
                 self.use_eagle = True
                 self.num_lookahead_tokens = self.num_spec_tokens
-
-        # Create the KV cache manager.
+        
         self.kv_cache_manager = KVCacheManager(
             kv_cache_config=kv_cache_config,
             max_model_len=self.max_model_len,
@@ -162,7 +169,74 @@ class Scheduler(SchedulerInterface):
             log_stats=self.log_stats,
             enable_kv_cache_events=self.enable_kv_cache_events,
         )
+        
+        self.connector.initialize_gpu_manager()
+        #self.running_prefill = self.connector.gpu_manager.list()
+
+        
+        """
+        #if self.vllm_config.kv_transfer_config is not None and self.vllm_config.kv_transfer_config.kv_connector=="IntraGPUConnector":
+        #    if self.vllm_config.kv_transfer_config.kv_role == "kv_producer":
+        GPUManager.register("get_kvcachemanager", callable=lambda: self.running)
+        #register_function(self.kv_cache_manager)
+        authkey="secret"
+        self.gpu_manager = GPUManager(address=("127.0.0.1", 20001), authkey=authkey.encode("utf-8"))
+        if self.vllm_config.kv_transfer_config is not None and self.vllm_config.kv_transfer_config.kv_connector=="IntraGPUConnector":
+            if self.vllm_config.kv_transfer_config.kv_role == "kv_producer":
+                logger.info("starting GPU manager producer")
+                self.gpu_manager.start()
+            else:
+                logger.info("starting GPU manager consumer")
+                self.gpu_manager.connect()
+            #self.connector.initialize_gpu_manager(self.vllm_config.kv_transfer_config.kv_role,self.kv_cache_manager)
+        """
+        """
+        if self.vllm_config.kv_transfer_config is not None and self.vllm_config.kv_transfer_config.kv_connector=="IntraGPUConnector":
+            if self.vllm_config.kv_transfer_config.kv_role == "kv_producer":
+                self.kv_cache_manager = KVCacheManager(
+                    kv_cache_config=kv_cache_config,
+                    max_model_len=self.max_model_len,
+                    enable_caching=self.cache_config.enable_prefix_caching,
+                    use_eagle=self.use_eagle,
+                    log_stats=self.log_stats,
+                    enable_kv_cache_events=self.enable_kv_cache_events, 
+                )
+                GPUManager.register("get_kvcachemanager", callable=lambda: self.kv_cache_manager)
+                #TODO instantiate GPUmanager? only if there are no more registrations required
+                #register_kvcachemanager(self.vllm_config.kv_transfer_config.kv_role,self.kv_cache_manager)
+                self.connector.initialize_gpu_manager(self.vllm_config.kv_transfer_config.kv_role,self.kv_cache_manager)
+            else:
+                GPUManager.register("get_kvcachemanager")
+                #TODO instantiate GPUmanager? only if there are no more registrations required
+                #register_kvcachemanager(self.vllm_config.kv_transfer_config.kv_role)
+                self.connector.initialize_gpu_manager(self.vllm_config.kv_transfer_config.kv_role)
+                self.kv_cache_manager = self.connector.gpu_manager.get_kvcachemanager()
+        else:
+            # Create the KV cache manager.
+            self.kv_cache_manager = KVCacheManager(
+                kv_cache_config=kv_cache_config,
+                max_model_len=self.max_model_len,
+                enable_caching=self.cache_config.enable_prefix_caching,
+                use_eagle=self.use_eagle,
+                log_stats=self.log_stats,
+                enable_kv_cache_events=self.enable_kv_cache_events,
+            )
+        """
         self.use_pp = self.parallel_config.pipeline_parallel_size > 1
+
+    def register_and_initialize(self):
+        GPUManager.register("get_kvcachemanager")
+        if self.vllm_config.kv_transfer_config is not None and self.vllm_config.kv_transfer_config.kv_connector=="IntraGPUConnector":
+            if self.vllm_config.kv_transfer_config.kv_role == "kv_producer":
+                GPUManager.register("get_kvcachemanager", callable=lambda: self.kv_cache_manager)
+            authkey="secret"
+            self.gpu_manager = GPUManager(address=("127.0.0.1", 40001), authkey=authkey.encode("utf-8"))
+            if self.vllm_config.kv_transfer_config.kv_role == "kv_producer":
+                logger.info("starting GPU manager producer")
+                self.gpu_manager.start()
+            else:
+                logger.info("starting GPU manager consumer")
+                self.gpu_manager.connect()
 
     def schedule(self) -> SchedulerOutput:
         # NOTE(woosuk) on the scheduling algorithm:
@@ -175,7 +249,9 @@ class Scheduler(SchedulerInterface):
         # num_tokens_with_spec. This is general enough to cover
         # chunked prefills, prefix caching, speculative decoding,
         # and the "jump decoding" optimization in the future.
-
+        logger.info("Scheduling")
+        if self.connector is not None:
+            logger.info("scheduler connector exists")
         scheduled_new_reqs: list[Request] = []
         scheduled_resumed_reqs: list[Request] = []
         scheduled_running_reqs: list[Request] = []
@@ -195,7 +271,7 @@ class Scheduler(SchedulerInterface):
 
         # First, schedule the RUNNING requests.
         req_index = 0
-        while req_index < len(self.running) and token_budget > 0:
+        while req_index < len(self.running): #and token_budget > 0: #we dont care about token budget for now
             request = self.running[req_index]
 
             num_new_tokens = (request.num_tokens_with_spec +
@@ -585,7 +661,9 @@ class Scheduler(SchedulerInterface):
         # 1. Plan the KV cache store
         # 2. Wrap up all the KV cache load / save ops into an opaque object
         # 3. Clear the internal states of the connector
+        print(self.connector)
         if self.connector is not None:
+            logger.info("building scheduler metadata")
             meta = self.connector.build_connector_meta(scheduler_output)
             scheduler_output.kv_connector_metadata = meta
 

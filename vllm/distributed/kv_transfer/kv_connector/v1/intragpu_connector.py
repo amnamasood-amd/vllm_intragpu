@@ -3,7 +3,7 @@
 import hashlib
 import os
 from dataclasses import dataclass
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Optional
 
 import safetensors
 import torch
@@ -15,7 +15,10 @@ from vllm.logger import init_logger
 from vllm.v1.attention.backends.mla.common import MLACommonMetadata
 from vllm.v1.core.sched.output import SchedulerOutput
 
+#from vllm.distributed.kv_transfer.kv_connector.v1.intragpu_manager import GPUManager
 from multiprocessing.managers import BaseManager, SyncManager
+import multiprocessing
+from vllm.v1.core.kv_cache_manager import KVCacheManager
 
 if TYPE_CHECKING:
     from vllm.attention.backends.abstract import AttentionMetadata
@@ -25,6 +28,18 @@ if TYPE_CHECKING:
 
 logger = init_logger(__name__)
 
+
+class SchedulerManager(SyncManager):
+    pass
+
+SchedulerManager.register("get_queue")
+SchedulerManager.register("get_list")
+
+class WorkerManager(SyncManager):
+    pass
+
+WorkerManager.register("get_queue")
+WorkerManager.register("get_list")
 
 @dataclass
 class ReqMeta:
@@ -55,6 +70,8 @@ class ReqMeta:
         )
 
 
+
+
 @dataclass
 class IntraGPUConnectorMetadata(KVConnectorMetadata):
     requests: list[ReqMeta]
@@ -74,22 +91,143 @@ class IntraGPUConnectorMetadata(KVConnectorMetadata):
             ReqMeta.make_meta(token_ids, block_ids, block_size, is_store,
                               mm_hashes))
 
+class queue_manager:
+    def __init__(self):
+        #self.base_manager=SyncManager()
+        #self.base_manager.start()
+        self.q = multiprocessing.Queue()
+        self.l = [] #self.base_manager.list([])
+    #def set_list(self):
+    #    self.l = self.base_manager.list([])
+    def get_queue(self):
+        return self.q
+    def get_list(self):
+        return self.l
+
+class connector_manager:
+    class custom_manager(BaseManager):
+        pass
+
+    def __init__(self, connector_role, kv_role):
+        self.queue=multiprocessing.Queue()
+        if kv_role=="kv_producer":
+            self.custom_manager.register("get_queue", callable=lambda: self.queue)
+        else:
+            self.custom_manager.register("get_queue")
+        authkey="secret"
+        if connector_role == KVConnectorRole.SCHEDULER:
+            logger.info("scheduler")
+            self.gpu_manager=self.custom_manager(address=("127.0.0.1", 40001), authkey=authkey.encode("utf-8"))
+        else:
+            logger.info("worker")
+            self.gpu_manager=self.custom_manager(address=("127.0.0.1", 40002), authkey=authkey.encode("utf-8"))
+        
+        if kv_role=="kv_producer":
+            self.gpu_manager.start()
+            self.queue.put("queue msg")
+        else:
+            self.gpu_manager.connect()
+            self.queue = self.gpu_manager.get_queue()
+            l=self.queue.get()
+            print(l)
+    
+
+
 
 class IntraGPUConnector(KVConnectorBase_V1):
     # NOTE: This is Simple debug implementation of the KV connector.
     # It save / load the KV cache to / from the disk.
     # It does extra work which will overwrite the existing prefix-cache in GPU
     # - to remove the overhead, need to add some "mask" in the ReqMeta class
+    transfer_config=None
 
     def __init__(self, vllm_config: "VllmConfig", role: KVConnectorRole):
         super().__init__(vllm_config=vllm_config, role=role)
         self._block_size = vllm_config.cache_config.block_size
         self._requests_need_load: dict[str, Request] = {}
-        transfer_config = vllm_config.kv_transfer_config
-        self._storage_path = transfer_config.get_from_extra_config(
+        self.transfer_config = vllm_config.kv_transfer_config
+        self._storage_path = self.transfer_config.get_from_extra_config(
             "shared_storage_path", "./tmpstorage")
+        
+        self.qmgr = queue_manager()
+        self.running_prefill=[] #self.qmgr.base_manager.list([])
+        self.gpu_manager=None
+
+        #self.base_manager=SyncManager()
+        """
+        if self.transfer_config.kv_role=="kv_producer":
+            GPUManager.register("get_queue", callable=lambda: self.qmgr.q)
+        
+        authkey="secret"
+        if role == KVConnectorRole.SCHEDULER:
+            logger.info("scheduler")
+            self.gpu_manager=GPUManager(address=("127.0.0.1", 40001), authkey=authkey.encode("utf-8"))
+        else:
+            logger.info("worker")
+            self.gpu_manager=GPUManager(address=("127.0.0.1", 40002), authkey=authkey.encode("utf-8"))
+        if self.transfer_config.kv_role=="kv_producer":
+            self.gpu_manager.start()
+            self.qmgr.q.put("queue msg")
+        else:
+            self.gpu_manager.connect()
+            #self.queue = self.gpu_manager.get_queue()
+            l=self.qmgr.g.get()
+            print(l)
+        """
+        """
+        self.queue_manager = connector_manager(role, self.transfer_config.kv_role)
+        """
         logger.info(vllm_config.kv_transfer_config)
         logger.info("Shared storage path is %s", self._storage_path)
+
+    #def get_queue(self):
+    #    return self.queue
+    
+    #def get_running_prefill(self):
+    #    return self.running_prefill
+
+    def initialize_gpu_manager(self):
+        #self.base_manager.start()
+        #self.running_prefill = []#self.base_manager.list([4])
+        if self.role==KVConnectorRole.SCHEDULER:
+            GPUManager=SchedulerManager
+        else:
+            GPUManager=WorkerManager
+        #self.qmgr.set_list()
+        #hardcoding for now
+        authkey="secret"
+        if self.transfer_config.kv_role == "kv_producer":
+            GPUManager.register("get_queue", callable= self.qmgr.get_queue)
+            GPUManager.register("get_list", callable= self.qmgr.get_list)
+        else:
+            GPUManager.register("get_queue")
+            GPUManager.register("get_list")
+        
+        if self.role==KVConnectorRole.SCHEDULER:
+            self.gpu_manager = GPUManager(address=("127.0.0.1", 40001), authkey=authkey.encode("utf-8"))
+        else:
+            self.gpu_manager = GPUManager(address=("127.0.0.1", 40002), authkey=authkey.encode("utf-8"))
+            
+        if self.transfer_config.kv_role == "kv_producer":   
+            logger.info("starting GPU manager producer")
+            self.gpu_manager.start()
+            self.qmgr.q.put("qmsg")
+            
+            self.running_prefill=self.qmgr.l
+            logger.info("done starting GPU manager producer")
+        elif self.transfer_config.kv_role == "kv_consumer":
+            #GPUManager.register("get_kvcachemanager")
+            logger.info("starting GPU manager consumer")
+            self.gpu_manager.connect()
+            self.qmgr.q=self.gpu_manager.get_queue()
+            msg=self.qmgr.q.get()
+            print(msg)
+            self.running_prefill=self.gpu_manager.get_list()
+            print(self.running_prefill)
+            #l=q.get()
+            #print(l)
+            #print(self.gpu_manager.get_kvcachemanager().kv_cache_config)
+    
 
     def start_load_kv(self, forward_context: "ForwardContext",
                       **kwargs) -> None:
@@ -111,6 +249,7 @@ class IntraGPUConnector(KVConnectorBase_V1):
             src_kv_cache: torch.Tensor,
             slot_mapping: torch.Tensor,
         ) -> None:
+            pass
             """Inject the KV cache into the layer.
 
             Args:
@@ -122,6 +261,7 @@ class IntraGPUConnector(KVConnectorBase_V1):
                     otherwise.
                 slot_mapping (torch.Tensor): the slot mapping. In shape 
                     [num_tokens].
+            """
             """
             dst_kv_cache_layer_shape = dst_kv_cache_layer.shape
             if isinstance(attn_metadata, MLACommonMetadata):
@@ -138,10 +278,15 @@ class IntraGPUConnector(KVConnectorBase_V1):
                     2, num_pages * page_size, -1)
                 dst_kv_cache_layer[:, slot_mapping, ...] = src_kv_cache
                 dst_kv_cache_layer.reshape(dst_kv_cache_layer_shape)
+            """
+            #if dst_kv_cache_layer != src_kv_cache:
+            #print(dst_kv_cache_layersrc_kv_cache_layer)
 
         # Get the metadata
         metadata: KVConnectorMetadata = self._get_connector_metadata()
         assert isinstance(metadata, IntraGPUConnectorMetadata)
+        logger.info("Printing Connector metadata from scheduler")
+        print(metadata)
 
         if metadata is None:
             logger.warning(
@@ -157,6 +302,8 @@ class IntraGPUConnector(KVConnectorBase_V1):
 
         # Load the KV for each request each layer
         for request in metadata.requests:
+            logger.info("Printing request")
+            print(request)
             if request.is_store:
                 continue
             logger.info("Inject KV cache of %d tokens to the paged memory",
@@ -170,7 +317,7 @@ class IntraGPUConnector(KVConnectorBase_V1):
                 kv_cache_attr = getattr(layer, 'kv_cache', None)
                 if kv_cache_attr is None:
                     continue
-
+                """
                 kv_cache_layer = kv_cache_attr[ \
                         forward_context.virtual_engine]
 
@@ -180,6 +327,7 @@ class IntraGPUConnector(KVConnectorBase_V1):
                     filename)["kv_cache"].cuda()
                 inject_kv_into_layer(kv_cache_layer, kv_cache,
                                      request.slot_mapping)
+                """
 
     def wait_for_layer_load(self, layer_name: str) -> None:
         """Blocking until the KV for a specific layer is loaded into vLLM's
@@ -224,6 +372,7 @@ class IntraGPUConnector(KVConnectorBase_V1):
 
         connector_metadata = self._get_connector_metadata()
         assert isinstance(connector_metadata, IntraGPUConnectorMetadata)
+        """
         for request in connector_metadata.requests:
             if request.is_store:
                 filename = self._generate_filename_debug(
@@ -232,6 +381,7 @@ class IntraGPUConnector(KVConnectorBase_V1):
                                                  request.slot_mapping)
                 tensors = {"kv_cache": kv_cache.detach().cpu()}
                 safetensors.torch.save_file(tensors, filename)
+        """
 
     def wait_for_save(self):
         return
@@ -282,8 +432,9 @@ class IntraGPUConnector(KVConnectorBase_V1):
         If blocks were allocated, add to _requests_need_load,
         such that we load the KVs in the next forward pass.
         """
-        if num_external_tokens > 0:
-            self._requests_need_load[request.request_id] = request
+        pass
+        #if num_external_tokens > 0:
+        #    self._requests_need_load[request.request_id] = request
 
     def build_connector_meta(
         self,
@@ -298,7 +449,7 @@ class IntraGPUConnector(KVConnectorBase_V1):
             scheduler_output (SchedulerOutput): the scheduler output object.
         """
         meta = IntraGPUConnectorMetadata()
-
+        """
         total_need_load = 0
         for new_req in scheduler_output.scheduled_new_reqs:
             if new_req.req_id in self._requests_need_load:
@@ -352,7 +503,9 @@ class IntraGPUConnector(KVConnectorBase_V1):
 
         assert total_need_load == len(self._requests_need_load)
         self._requests_need_load.clear()
+        """
         return meta
+        
 
     # ==============================
     # Helper functions
@@ -364,6 +517,7 @@ class IntraGPUConnector(KVConnectorBase_V1):
     ) -> bool:
         """Check if the cache is hit for the request.
         """
+        """
         num_tokens_to_check = align_to_block_size(
             len(request.prompt_token_ids) - 1, self._block_size)
         foldername = self._generate_foldername_debug(torch.tensor(
@@ -371,6 +525,8 @@ class IntraGPUConnector(KVConnectorBase_V1):
                                                      request.mm_hashes,
                                                      create_folder=False)
         return os.path.exists(foldername)
+        """
+        return True
 
     def _generate_foldername_debug(
         self,
