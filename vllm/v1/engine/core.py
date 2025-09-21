@@ -34,7 +34,7 @@ from vllm.v1.core.kv_cache_utils import (BlockHash, get_kv_cache_config,
                                          init_none_hash,
                                          unify_kv_cache_configs)
 from vllm.v1.core.sched.interface import SchedulerInterface
-from vllm.v1.core.sched.output import SchedulerOutput
+from vllm.v1.core.sched.output import SchedulerOutput, SchedulerOutputPrefill
 from vllm.v1.core.sched.scheduler import Scheduler as V1Scheduler
 from vllm.v1.engine import (EngineCoreOutputs, EngineCoreRequest,
                             EngineCoreRequestType,
@@ -50,6 +50,9 @@ from vllm.v1.request import Request, RequestStatus
 from vllm.v1.serial_utils import MsgpackDecoder, MsgpackEncoder
 from vllm.v1.structured_output import StructuredOutputManager
 from vllm.version import __version__ as VLLM_VERSION
+
+from queue import Empty
+import time
 
 logger = init_logger(__name__)
 
@@ -278,26 +281,114 @@ class EngineCore:
                                   self.scheduler.make_stats())
             raise err
 
+    
+
     def step(self) -> tuple[dict[int, EngineCoreOutputs], bool]:
         """Schedule, execute, and make output.
 
         Returns tuple of outputs and a flag indicating whether the model
         was executed.
         """
-
-        # Check for any requests remaining in the scheduler - unfinished,
-        # or finished and not yet removed from the batch.
         if not self.scheduler.has_requests():
             return {}, False
-        scheduler_output = self.scheduler.schedule()
-        logger.info("in core calling execute model and checking connector")
-        print(scheduler_output.kv_connector_metadata)
-        model_output = self.execute_model_with_error_logging(
-            self.model_executor.execute_model,  # type: ignore
-            scheduler_output)
-        engine_core_outputs = self.scheduler.update_from_output(
-            scheduler_output, model_output)  # type: ignore
+        # scheduler_output = self.scheduler.schedule()
+        # #logger.info("in core calling execute model and checking connector")
+        # #self.scheduler.connector.qmgr.q.put(scheduler_output) #temporary test. this has to shift to scheduler
+        # #print(scheduler_output.kv_connector_metadata)
+        # model_output = self.execute_model_with_error_logging(
+        #     self.model_executor.execute_model,  # type: ignore
+        #     scheduler_output)
+        # engine_core_outputs = self.scheduler.update_from_output(
+        #     scheduler_output, model_output)
+        
 
+        #Check for any requests remaining in the scheduler - unfinished,
+        #or finished and not yet removed from the batch.
+        engine_core_outputs=None
+        model_output=None
+        if self.scheduler.connector.transfer_config.kv_role == "kv_producer":
+            #if not self.scheduler.has_requests():
+            #    return {}, False
+            scheduler_output = self.scheduler.schedule()
+            if scheduler_output:
+                #logger.info("in core calling execute model and checking connector")
+                #self.scheduler.connector.qmgr.set_sched_out(scheduler_output) #temporary test. this has to shift to scheduler
+                sched_out_prefill = SchedulerOutputPrefill.from_scheduler_output(scheduler_output)
+                #self.scheduler.connector.qmgr.q.put(sched_out_prefill)
+                #print(scheduler_output.kv_connector_metadata)
+                model_output = self.execute_model_with_error_logging(
+                    self.model_executor.execute_model,  # type: ignore
+                    scheduler_output)
+                engine_core_outputs = self.scheduler.update_from_output(
+                    scheduler_output, model_output)  # type: ignore
+                print(engine_core_outputs)
+            else:
+                return {}, False
+        else:
+            # scheduler_output = self.scheduler.schedule()
+            # #logger.info("in core calling execute model and checking connector")
+            # #self.scheduler.connector.qmgr.q.put(scheduler_output) #temporary test. this has to shift to scheduler
+            # #print(scheduler_output.kv_connector_metadata)
+            # model_output = self.execute_model_with_error_logging(
+            #     self.model_executor.execute_model,  # type: ignore
+            #     scheduler_output)
+            # engine_core_outputs = self.scheduler.update_from_output(
+            #     scheduler_output, model_output)  # type: ignore
+
+            # while True:
+            #     try:
+            #         scheduler_output = self.scheduler.connector.qmgr.q.get(block=False)
+            #         logger.info("Printing scheduler output")
+            #         print(scheduler_output)
+            #         model_output = self.execute_model_with_error_logging(
+            #             self.model_executor.execute_model,  # type: ignore
+            #             scheduler_output)
+            #         engine_core_outputs = self.scheduler.prefill_update_from_output(
+            #             scheduler_output, model_output)
+            #         break
+            #     except Empty:
+            #         logger.info("no scheduler output available from decode instance")
+            #         time.sleep(1)
+            #         continue
+
+            # scheduler_output = self.scheduler.connector.qmgr.q.get()
+            # logger.info("Printing scheduler output")
+            # print(scheduler_output)
+            # model_output = self.execute_model_with_error_logging(
+            #     self.model_executor.execute_model,  # type: ignore
+            #     scheduler_output)
+            # engine_core_outputs = self.scheduler.prefill_update_from_output(
+            #     scheduler_output, model_output)
+
+            
+            try:
+                    scheduler_output_prefill = self.scheduler.connector.qmgr.q.get_nowait()
+                    logger.info("Printing scheduler output")
+                    scheduler_output=SchedulerOutput.from_scheduleroutputprefill(scheduler_output_prefill)
+                    print(scheduler_output)
+                    meta = self.scheduler.connector.build_connector_meta(scheduler_output)
+                    scheduler_output.kv_connector_metadata = meta
+
+                    model_output = self.execute_model_with_error_logging(
+                        self.model_executor.execute_model,  # type: ignore
+                        scheduler_output)
+                    engine_core_outputs = self.scheduler.prefill_update_from_output(
+                        scheduler_output, model_output)
+            except Empty:
+                    #logger.info("no scheduler output available from decode instance")
+                    return {}, False
+
+            # scheduler_output = self.scheduler.connector.gpu_manager.get_sched_out()
+            # logger.info("Printing scheduler output")
+            # print(scheduler_output)
+            # model_output = self.execute_model_with_error_logging(
+            #             self.model_executor.execute_model,  # type: ignore
+            #             scheduler_output)
+            # engine_core_outputs = self.scheduler.prefill_update_from_output(
+            #             scheduler_output, model_output)
+            
+
+        
         return (engine_core_outputs,
                 scheduler_output.total_num_scheduled_tokens > 0)
 
@@ -325,7 +416,7 @@ class EngineCore:
         """
         batch_queue = self.batch_queue
         assert batch_queue is not None
-
+        logger.info("In step_with_batch_queue")
         # Try to schedule a new batch if the batch queue is not full, but
         # the scheduler may return an empty batch if all requests are scheduled.
         # Note that this is not blocking.

@@ -114,23 +114,7 @@ benchmark() {
     --result-filename "$tag"-qps-"$qps".json \
     --request-rate "$qps"
 
-  """
-  vllm bench serve \
-    --backend vllm \
-    --model $model \
-    --dataset-name $dataset_name \
-    --dataset-path $dataset_path \
-    --sonnet-input-len $input_len \
-    --sonnet-output-len "$output_len" \
-    --sonnet-prefix-len $prefix_len \
-    --num-prompts $num_prompts \
-    --port 8000 \
-    --save-result \
-    --result-dir $results_folder \
-    --result-filename "$tag"-qps-"$qps".json \
-    --request-rate "$qps"
-  """
-
+  
   sleep 2
 }
 

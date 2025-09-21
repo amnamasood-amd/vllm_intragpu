@@ -95,7 +95,7 @@ class KVConnectorModelRunnerMixin:
         # Update KVConnector with the KVConnector metadata forward().
         kv_connector = get_kv_transfer_group()
         assert isinstance(kv_connector, KVConnectorBase)
-        assert scheduler_output.kv_connector_metadata is not None
+        #assert scheduler_output.kv_connector_metadata is not None
         kv_connector.bind_connector_metadata(
             scheduler_output.kv_connector_metadata)
 

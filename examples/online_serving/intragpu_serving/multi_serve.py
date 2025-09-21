@@ -55,13 +55,13 @@ def add_cli_args(parser: argparse.ArgumentParser):
         "in seconds (default: 600 seconds / 10 minutes).",
     )
 
-def main() -> str:
+def main():
     parser = argparse.ArgumentParser()
     add_cli_args(parser)
     args = parser.parse_args()
-    return asyncio.run(main_async(args))
+    asyncio.run(main_async(args))
 
-async def main_async(args: argparse.Namespace) -> str:
+async def main_async(args: argparse.Namespace):
     print("here")
     print(args)
     request_func = ASYNC_REQUEST_FUNCS[args.endpoint_type]
@@ -91,42 +91,40 @@ async def main_async(args: argparse.Namespace) -> str:
         timeout=aiohttp.ClientTimeout(total=6 * 60 * 60),
     )
 
-    test_prompt=50*"San Francisco is a "
-    test_prompt_len = len(test_prompt)
-    test_output_len = 10
+    semaphore = None #asyncio.Semaphore(max_concurrency) if max_concurrency else None
+    async def limited_request_func(request_func_input):
+        if semaphore is None:
+            return await request_func(request_func_input=request_func_input, session=session)
+        async with semaphore:
+            return await request_func(request_func_input=request_func_input, session=session)
 
-    test_input = RequestFuncInput(
-        model=args.model,
-        model_name=args.model,
-        prompt=test_prompt,
-        api_url=api_url,
-        prompt_len=test_prompt_len,
-        output_len=test_output_len,
-        #logprobs=logprobs,
-        #multi_modal_content=test_mm_content,
-        #ignore_eos=ignore_eos,
-        #extra_body=extra_body,
-    )
+    test_prompts=[50*"San Francisco is a " for i in range(5)]
+    tasks: list[asyncio.Task] = []
+
+    for test_prompt in test_prompts:
+        test_prompt_len = len(test_prompt)
+        test_output_len = 10
+
+        test_input = RequestFuncInput(
+            model=args.model,
+            model_name=args.model,
+            prompt=test_prompt,
+            api_url=api_url,
+            prompt_len=test_prompt_len,
+            output_len=test_output_len,
+            #logprobs=logprobs,
+            #multi_modal_content=test_mm_content,
+            #ignore_eos=ignore_eos,
+            #extra_body=extra_body,
+        )
+        task = limited_request_func(request_func_input=test_input)
+        tasks.append(asyncio.create_task(task))
+    outputs: list[RequestFuncOutput] = await asyncio.gather(*tasks)
+    print(outputs)
     
-
-    test_output = await wait_for_endpoint(
-        request_func,
-        test_input,
-        session,
-        timeout_seconds=args.ready_check_timeout_sec,
-    )
-
-    if not test_output.success:
-        raise ValueError(
-            "Initial test run failed - Please make sure benchmark arguments "
-            f"are correctly specified. Error: {test_output.error}")
-    else:
-        print("Initial test run completed. Starting main benchmark run...")
-
-    print(test_output)
     await session.close()
 
-    return test_output.generated_text
+    #return test_output.generated_text
 
 if __name__ == "__main__":
     main()

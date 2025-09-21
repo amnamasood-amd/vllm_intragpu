@@ -1481,8 +1481,8 @@ class GPUModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
         (attn_metadata, logits_indices, spec_decode_metadata,
          num_scheduled_tokens_np, spec_decode_common_attn_metadata,
          max_query_len) = self._prepare_inputs(scheduler_output)
-        #logger.info("Printing attn_metadata")
-        #print(attn_metadata)
+        logger.info("Printing attn_metadata")
+        print(attn_metadata)
         num_scheduled_tokens = scheduler_output.total_num_scheduled_tokens
         if (self.compilation_config.cudagraph_mode != CUDAGraphMode.NONE
                 and not envs.VLLM_DISABLE_PAD_FOR_CUDAGRAPH
@@ -1755,6 +1755,7 @@ class GPUModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
             kv_connector_output=kv_connector_output,
             num_nans_in_logits=num_nans_in_logits,
         )
+
 
     def take_draft_token_ids(self) -> Optional[DraftTokenIds]:
         if self._draft_token_ids is None:

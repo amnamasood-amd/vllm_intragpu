@@ -13,7 +13,7 @@ from vllm.distributed.kv_transfer.kv_connector.v1.base import (
     KVConnectorBase_V1, KVConnectorMetadata, KVConnectorRole)
 from vllm.logger import init_logger
 from vllm.v1.attention.backends.mla.common import MLACommonMetadata
-from vllm.v1.core.sched.output import SchedulerOutput
+from vllm.v1.core.sched.output import SchedulerOutput, SchedulerOutputPrefill
 
 #from vllm.distributed.kv_transfer.kv_connector.v1.intragpu_manager import GPUManager
 from multiprocessing.managers import BaseManager, SyncManager
@@ -34,12 +34,18 @@ class SchedulerManager(SyncManager):
 
 SchedulerManager.register("get_queue")
 SchedulerManager.register("get_list")
+SchedulerManager.register("set_list")
+SchedulerManager.register("get_sched_out")
+SchedulerManager.register("set_sched_out")
 
 class WorkerManager(SyncManager):
     pass
 
 WorkerManager.register("get_queue")
 WorkerManager.register("get_list")
+WorkerManager.register("set_list")
+WorkerManager.register("get_sched_out")
+WorkerManager.register("set_sched_out")
 
 @dataclass
 class ReqMeta:
@@ -97,12 +103,20 @@ class queue_manager:
         #self.base_manager.start()
         self.q = multiprocessing.Queue()
         self.l = [] #self.base_manager.list([])
+        self.sched_out: SchedulerOutputPrefill=None
     #def set_list(self):
     #    self.l = self.base_manager.list([])
     def get_queue(self):
         return self.q
     def get_list(self):
         return self.l
+    def set_list(self, l):
+        self.l = l
+    def get_sched_out(self):
+        return self.sched_out
+    def set_sched_out(self, sched_out: SchedulerOutput):
+        self.sched_out = SchedulerOutputPrefill.from_scheduler_output(sched_out)
+        
 
 class connector_manager:
     class custom_manager(BaseManager):
@@ -199,9 +213,15 @@ class IntraGPUConnector(KVConnectorBase_V1):
         if self.transfer_config.kv_role == "kv_producer":
             GPUManager.register("get_queue", callable= self.qmgr.get_queue)
             GPUManager.register("get_list", callable= self.qmgr.get_list)
+            GPUManager.register("set_list", callable= self.qmgr.set_list)
+            GPUManager.register("get_sched_out", callable= self.qmgr.get_sched_out)
+            GPUManager.register("set_sched_out", callable= self.qmgr.set_sched_out)
         else:
             GPUManager.register("get_queue")
             GPUManager.register("get_list")
+            GPUManager.register("set_list")
+            GPUManager.register("get_sched_out")
+            GPUManager.register("set_sched_out")
         
         if self.role==KVConnectorRole.SCHEDULER:
             self.gpu_manager = GPUManager(address=("127.0.0.1", 40001), authkey=authkey.encode("utf-8"))
@@ -214,6 +234,7 @@ class IntraGPUConnector(KVConnectorBase_V1):
             self.qmgr.q.put("qmsg")
             
             self.running_prefill=self.qmgr.l
+            
             logger.info("done starting GPU manager producer")
         elif self.transfer_config.kv_role == "kv_consumer":
             #GPUManager.register("get_kvcachemanager")
@@ -224,6 +245,7 @@ class IntraGPUConnector(KVConnectorBase_V1):
             print(msg)
             self.running_prefill=self.gpu_manager.get_list()
             print(self.running_prefill)
+            self.gpu_manager.set_list(["dummy_id"])
             #l=q.get()
             #print(l)
             #print(self.gpu_manager.get_kvcachemanager().kv_cache_config)
@@ -411,6 +433,8 @@ class IntraGPUConnector(KVConnectorBase_V1):
         # NOTE: in current v1 scheduler, the num_computed_tokens is aligned
         # with the block granularity. And it expects the returned blocks and
         # num_computed_tokens to also be aligned with the block granularity.
+        
+        """
         if not self._found_match_for_request(request):
             return 0, False
 
@@ -422,6 +446,8 @@ class IntraGPUConnector(KVConnectorBase_V1):
             len(request.prompt_token_ids) - 1, self._block_size)
 
         return num_tokens_to_check - num_computed_tokens, False
+        """
+        return 0, False
 
     def update_state_after_alloc(self, request: "Request",
                                  blocks: "KVCacheBlocks",
@@ -432,9 +458,9 @@ class IntraGPUConnector(KVConnectorBase_V1):
         If blocks were allocated, add to _requests_need_load,
         such that we load the KVs in the next forward pass.
         """
-        pass
-        #if num_external_tokens > 0:
-        #    self._requests_need_load[request.request_id] = request
+        #pass
+        if num_external_tokens > 0:
+            self._requests_need_load[request.request_id] = request
 
     def build_connector_meta(
         self,
@@ -449,7 +475,7 @@ class IntraGPUConnector(KVConnectorBase_V1):
             scheduler_output (SchedulerOutput): the scheduler output object.
         """
         meta = IntraGPUConnectorMetadata()
-        """
+        
         total_need_load = 0
         for new_req in scheduler_output.scheduled_new_reqs:
             if new_req.req_id in self._requests_need_load:
@@ -503,7 +529,7 @@ class IntraGPUConnector(KVConnectorBase_V1):
 
         assert total_need_load == len(self._requests_need_load)
         self._requests_need_load.clear()
-        """
+        
         return meta
         
 

@@ -242,13 +242,17 @@ main() {
     # =============================================================================
     # Run Benchmark
     # =============================================================================
-    # cd ../../../benchmarks/
-    # vllm bench serve --port 10001 --seed $(date +%s) \
+    cd ../../../benchmarks/
+    #vllm bench serve --port 10001 --seed $(date +%s) \
     #     --model $MODEL \
     #     --dataset-name random --random-input-len 7500 --random-output-len 200 \
     #     --num-prompts 100 --burstiness 100 --request-rate 100 | tee benchmark.log
     
-    #echo "Benchmarking done. Cleaning up..."
+    vllm bench serve --port $PROXY_PORT --seed $(date +%s) \
+         --model $MODEL \
+         --dataset-name sonnet --dataset-path "./sonnet_4x.txt" --sonnet-input-len 256 --sonnet-output-len 6 \
+         --num-prompts 100  --request-rate 2 | tee benchmark.log
+    echo "Benchmarking done. Cleaning up..."
 
     #output1=$(curl -X POST -s http://localhost:30001/v1/completions \
     #-H "Content-Type: application/json" \
@@ -258,7 +262,7 @@ main() {
     #"max_tokens": 10,
     #"temperature": 0
     #}')
-    python3 single_serve.py --port $PROXY_PORT --model $MODEL
+    #python3 single_serve.py --port $PROXY_PORT --model $MODEL
     cleanup
 
     #echo $output1

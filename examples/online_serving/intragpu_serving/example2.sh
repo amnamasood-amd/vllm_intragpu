@@ -156,6 +156,9 @@ main() {
     IFS=',' read -ra DECODE_PORT_ARRAY <<< "$DECODE_PORTS"
     
     echo ""
+    # =============================================================================
+    # Launch Decode Servers (Y Decoders)
+    # =============================================================================
 
     echo "Starting ${#DECODE_GPU_ARRAY[@]} decode server(s)..."
     for i in "${!DECODE_GPU_ARRAY[@]}"; do
@@ -176,8 +179,9 @@ main() {
         --max-num-seqs 256 \
         --trust-remote-code \
         --gpu-memory-utilization 0.90 \
+        --no-enable-prefix-caching \
         --kv-transfer-config \
-        "{\"kv_connector\":\"IntraGPUConnector\",\"kv_role\":\"kv_producer\",\"kv_buffer_size\":\"8e9\",\"kv_port\":\"$kv_port\"}" > decode$((i+1)).log &
+        "{\"kv_connector\":\"IntraGPUConnector\",\"kv_role\":\"kv_producer\",\"kv_buffer_size\":\"8e9\",\"kv_port\":\"$kv_port\"}" > decode.log &
         PIDS+=($!)
         #"{\"kv_connector\":\"P2pNcclConnector\",\"kv_role\":\"kv_consumer\",\"kv_buffer_size\":\"8e9\",\"kv_port\":\"$kv_port\",\"kv_connector_extra_config\":{\"proxy_ip\":\"0.0.0.0\",\"proxy_port\":\"$PROXY_PORT\",\"http_port\":\"$port\",\"send_type\":\"PUT_ASYNC\",\"nccl_num_channels\":\"16\"}}" > decode$((i+1)).log
     done
@@ -194,7 +198,7 @@ main() {
             exit 1
         fi
     done
-
+    
     # =============================================================================
     # Launch Prefill Servers (X Producers)
     # =============================================================================
@@ -218,8 +222,9 @@ main() {
         --max-num-seqs 256 \
         --trust-remote-code \
         --gpu-memory-utilization 0.90 \
+        --no-enable-prefix-caching \
         --kv-transfer-config \
-        "{\"kv_connector\":\"IntraGPUConnector\",\"kv_role\":\"kv_consumer\",\"kv_buffer_size\":\"1e1\",\"kv_port\":\"$kv_port\"}" > prefill$((i+1)).log &
+        "{\"kv_connector\":\"IntraGPUConnector\",\"kv_role\":\"kv_consumer\",\"kv_buffer_size\":\"1e1\",\"kv_port\":\"$kv_port\"}" > prefill.log &
         PIDS+=($!)
         #"{\"kv_connector\":\"P2pNcclConnector\",\"kv_role\":\"kv_producer\",\"kv_buffer_size\":\"1e1\",\"kv_port\":\"$kv_port\",\"kv_connector_extra_config\":{\"proxy_ip\":\"0.0.0.0\",\"proxy_port\":\"$PROXY_PORT\",\"http_port\":\"$port\",\"send_type\":\"PUT_ASYNC\",\"nccl_num_channels\":\"16\"}}" > prefill$((i+1)).log &
     done
@@ -233,9 +238,7 @@ main() {
             exit 1
         fi
     done
-    # =============================================================================
-    # Launch Decode Servers (Y Decoders)
-    # =============================================================================
+    
     
 
     
@@ -245,14 +248,14 @@ main() {
     echo ""
     echo "All servers are up. Starting benchmark..."
 
-    echo "Starting proxy server on port $PROXY_PORT..."
-    python3 proxy.py --port $PROXY_PORT &
-    PIDS+=($!)
-    if ! wait_for_server $PROXY_PORT; then
-        echo "Failed to start server on port $port"
-        cleanup
-        exit 1
-    fi
+    # echo "Starting proxy server on port $PROXY_PORT..."
+    # python3 proxy2.py --port $PROXY_PORT &
+    # PIDS+=($!)
+    # if ! wait_for_server $PROXY_PORT; then
+    #     echo "Failed to start server on port $port"
+    #     cleanup
+    #     exit 1
+    # fi
     
 
     # =============================================================================
@@ -266,15 +269,20 @@ main() {
     
     #echo "Benchmarking done. Cleaning up..."
 
-    #output1=$(curl -X POST -s http://localhost:30001/v1/completions \
-    #-H "Content-Type: application/json" \
-    #-d '{
-    #"model": "'"$MODEL"'",
-    #"prompt": "San Francisco is a",
-    #"max_tokens": 10,
-    #"temperature": 0
-    #}')
-    python3 single_serve.py --port $PROXY_PORT --model $MODEL
+    
+    # output1=$(curl -X POST -s http://localhost:$PROXY_PORT/v1/completions \
+    # -H "Content-Type: application/json" \
+    # -d '{
+    # "model": "'"$MODEL"'",
+    # "prompt": "San Francisco is a",
+    # "max_tokens": 10,
+    # "temperature": 0
+    # }')
+    # echo $output1
+
+    #python3 single_serve.py --port $PROXY_PORT --model $MODEL
+    #python3 multi_serve.py --port $PROXY_PORT --model $MODEL
+    python3 multi_serve_no_proxy.py --model $MODEL
     cleanup
 
     #echo $output1
