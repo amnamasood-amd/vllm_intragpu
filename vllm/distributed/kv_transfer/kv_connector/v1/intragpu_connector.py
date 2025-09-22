@@ -18,7 +18,9 @@ from vllm.v1.core.sched.output import SchedulerOutput, SchedulerOutputPrefill
 #from vllm.distributed.kv_transfer.kv_connector.v1.intragpu_manager import GPUManager
 from multiprocessing.managers import BaseManager, SyncManager
 import multiprocessing
+from multiprocessing import Process
 from vllm.v1.core.kv_cache_manager import KVCacheManager
+from vllm.distributed.parallel_state import get_world_group
 
 if TYPE_CHECKING:
     from vllm.attention.backends.abstract import AttentionMetadata
@@ -166,6 +168,8 @@ class IntraGPUConnector(KVConnectorBase_V1):
         self.qmgr = queue_manager()
         self.running_prefill=[] #self.qmgr.base_manager.list([])
         self.gpu_manager=None
+        self._rank = get_world_group().local_rank
+        logger.info("kv connector local rank %d", self._rank)
 
         #self.base_manager=SyncManager()
         """
@@ -200,6 +204,12 @@ class IntraGPUConnector(KVConnectorBase_V1):
     #def get_running_prefill(self):
     #    return self.running_prefill
 
+    # def start_manager(gpu_manager):
+    #     gpu_manager.start()
+
+    # def connect_manager(gpu_manager):
+    #     gpu_manager.connect()
+
     def initialize_gpu_manager(self):
         #self.base_manager.start()
         #self.running_prefill = []#self.base_manager.list([4])
@@ -224,13 +234,28 @@ class IntraGPUConnector(KVConnectorBase_V1):
             GPUManager.register("set_sched_out")
         
         if self.role==KVConnectorRole.SCHEDULER:
+            #port = 40001+self._rank
+            #logger.info("Scheduler Port is %d", port)
             self.gpu_manager = GPUManager(address=("127.0.0.1", 40001), authkey=authkey.encode("utf-8"))
+            #if self._rank==0:
+            #    self.gpu_manager = GPUManager(address=("127.0.0.1", 40001), authkey=authkey.encode("utf-8"))
+            #else:
+            #    self.gpu_manager = GPUManager(address=("127.0.0.1", 40002), authkey=authkey.encode("utf-8"))
         else:
-            self.gpu_manager = GPUManager(address=("127.0.0.1", 40002), authkey=authkey.encode("utf-8"))
+            #port = 41001+self._rank
+            #logger.info("Worker Port is %d", port)
+            self.gpu_manager = GPUManager(address=("127.0.0.1", 41001), authkey=authkey.encode("utf-8"))
+            #if self._rank==0:
+            #    self.gpu_manager = GPUManager(address=("127.0.0.1", 41001), authkey=authkey.encode("utf-8"))
+            #else:
+            #    self.gpu_manager = GPUManager(address=("127.0.0.1", 41002), authkey=authkey.encode("utf-8"))
             
         if self.transfer_config.kv_role == "kv_producer":   
             logger.info("starting GPU manager producer")
             self.gpu_manager.start()
+            #p=Process(target=self.start_manager, args=(self.gpu_manager,))
+            #p.daemon=False
+            #p.start()
             self.qmgr.q.put("qmsg")
             
             self.running_prefill=self.qmgr.l
@@ -240,6 +265,9 @@ class IntraGPUConnector(KVConnectorBase_V1):
             #GPUManager.register("get_kvcachemanager")
             logger.info("starting GPU manager consumer")
             self.gpu_manager.connect()
+            #p=Process(target=self.connect_manager, args=(self.gpu_manager,))
+            #p.daemon=False
+            #p.start()
             self.qmgr.q=self.gpu_manager.get_queue()
             msg=self.qmgr.q.get()
             print(msg)

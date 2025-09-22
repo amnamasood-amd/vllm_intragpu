@@ -99,6 +99,9 @@ else:
 
 from vllm.model_executor.model_loader.utils import send_tensor_with_untyped_storage
 import torch.multiprocessing as mp
+import pickle
+from vllm.distributed.parallel_state import get_world_group
+
 
 logger = init_logger(__name__)
 
@@ -1481,8 +1484,8 @@ class GPUModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
         (attn_metadata, logits_indices, spec_decode_metadata,
          num_scheduled_tokens_np, spec_decode_common_attn_metadata,
          max_query_len) = self._prepare_inputs(scheduler_output)
-        logger.info("Printing attn_metadata")
-        print(attn_metadata)
+        #logger.info("Printing attn_metadata")
+        #print(attn_metadata)
         num_scheduled_tokens = scheduler_output.total_num_scheduled_tokens
         if (self.compilation_config.cudagraph_mode != CUDAGraphMode.NONE
                 and not envs.VLLM_DISABLE_PAD_FOR_CUDAGRAPH
@@ -1928,7 +1931,7 @@ class GPUModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
         if has_kv_transfer_group():
             logger.info("Model runner has KVTransfer group, initializing q")
             kv_connector = get_kv_transfer_group()
-            kv_connector.initialize_gpu_manager()
+            #kv_connector.initialize_gpu_manager()
             
         logger.info("Starting to load model %s...", self.model_config.model)
         if eep_scale_up:
@@ -2946,11 +2949,18 @@ class GPUModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
                     for layer_name in kv_cache_tensor.shared_by:
                         kv_cache_raw_tensors[layer_name] = tensor
                     send_tensor_with_untyped_storage(tensor, kvcache_list)
-                print(len(kvcache_list))
-                kv_connector.qmgr.q.put(kvcache_list)
+                logger.info("kvcache_list length %d", len(kvcache_list))
+                #kv_connector.qmgr.q.put(kvcache_list)
+                rank = get_world_group().local_rank
+                with open("kvcache_handles_"+str(rank)+".pkl",'wb') as file:
+                    pickle.dump(kvcache_list,file)
             else:
-                kvcache_list=kv_connector.qmgr.q.get()
-                print(len(kvcache_list))
+                #kvcache_list=kv_connector.qmgr.q.get()
+                kvcache_list=None
+                rank = get_world_group().local_rank
+                with open("kvcache_handles_"+str(rank)+".pkl",'rb') as file:
+                    kvcache_list = pickle.load(file)
+                logger.info("kvcache_list length %d", len(kvcache_list))
                 kvcache_tensor_list=[]
                 for spec in kvcache_list:
                     kvcache_tensor_list.append(mp.reductions.rebuild_cuda_tensor(**spec))

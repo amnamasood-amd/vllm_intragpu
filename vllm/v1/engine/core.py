@@ -53,6 +53,7 @@ from vllm.version import __version__ as VLLM_VERSION
 
 from queue import Empty
 import time
+import pickle
 
 logger = init_logger(__name__)
 
@@ -82,6 +83,8 @@ class EngineCore:
         self.log_stats = log_stats
 
         # Setup Model.
+        logger.info("executor_class")
+        print(executor_class)
         self.model_executor = executor_class(vllm_config)
         if executor_fail_callback is not None:
             self.model_executor.register_failure_callback(
@@ -162,6 +165,8 @@ class EngineCore:
 
             self.request_block_hasher = get_request_block_hasher(
                 block_size, caching_hash_fn)
+
+        self.scheduler_prefill_requests = []
 
     def _initialize_kv_caches(
             self, vllm_config: VllmConfig) -> tuple[int, int, KVCacheConfig]:
@@ -313,7 +318,7 @@ class EngineCore:
             if scheduler_output:
                 #logger.info("in core calling execute model and checking connector")
                 #self.scheduler.connector.qmgr.set_sched_out(scheduler_output) #temporary test. this has to shift to scheduler
-                sched_out_prefill = SchedulerOutputPrefill.from_scheduler_output(scheduler_output)
+                #sched_out_prefill = SchedulerOutputPrefill.from_scheduler_output(scheduler_output)
                 #self.scheduler.connector.qmgr.q.put(sched_out_prefill)
                 #print(scheduler_output.kv_connector_metadata)
                 model_output = self.execute_model_with_error_logging(
@@ -323,7 +328,7 @@ class EngineCore:
                     scheduler_output, model_output)  # type: ignore
                 print(engine_core_outputs)
             else:
-                return {}, False
+                return self.scheduler.handle_finished_requests(), False
         else:
             # scheduler_output = self.scheduler.schedule()
             # #logger.info("in core calling execute model and checking connector")
@@ -361,8 +366,15 @@ class EngineCore:
             #     scheduler_output, model_output)
 
             
-            try:
-                    scheduler_output_prefill = self.scheduler.connector.qmgr.q.get_nowait()
+            
+            if os.path.exists("scheduler_output_prefill_"+str(self.scheduler._rank)+".pkl"): 
+                with open("scheduler_output_prefill_"+str(self.scheduler._rank)+".pkl",'rb') as file:
+                    scheduler_output_prefill = pickle.load(file)
+                #scheduler_output_prefill = self.scheduler.connector.qmgr.q.get_nowait()
+                current_new_req = [req.req_id for req in scheduler_output_prefill.scheduled_new_reqs]
+                if current_new_req == self.scheduler_prefill_requests:
+                    return {}, False
+                else:
                     logger.info("Printing scheduler output")
                     scheduler_output=SchedulerOutput.from_scheduleroutputprefill(scheduler_output_prefill)
                     print(scheduler_output)
@@ -374,7 +386,8 @@ class EngineCore:
                         scheduler_output)
                     engine_core_outputs = self.scheduler.prefill_update_from_output(
                         scheduler_output, model_output)
-            except Empty:
+                    self.scheduler_prefill_requests=current_new_req
+            else:
                     #logger.info("no scheduler output available from decode instance")
                     return {}, False
 

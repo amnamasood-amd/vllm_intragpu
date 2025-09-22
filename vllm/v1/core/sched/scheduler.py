@@ -36,6 +36,9 @@ from vllm.v1.spec_decode.metrics import SpecDecodingStats
 from vllm.v1.structured_output import StructuredOutputManager
 
 import time
+import pickle
+import os
+from vllm.distributed.parallel_state import get_world_group
 
 logger = init_logger(__name__)
 
@@ -167,8 +170,10 @@ class Scheduler(SchedulerInterface):
             enable_kv_cache_events=self.enable_kv_cache_events,
         )
         
-        self.connector.initialize_gpu_manager()
+        #self.connector.initialize_gpu_manager()
         self.use_pp = self.parallel_config.pipeline_parallel_size > 1
+
+        self._rank = get_world_group().local_rank
 
     def schedule(self) -> SchedulerOutput:
         # NOTE(woosuk) on the scheduling algorithm:
@@ -204,7 +209,10 @@ class Scheduler(SchedulerInterface):
         scheduled_resumed_reqs_prefill: list[Request] = []
         num_scheduled_tokens_prefill: dict[str, int] = {}
 
-        just_finished = self.connector.gpu_manager.get_list().copy()
+        just_finished = [] #self.connector.gpu_manager.get_list().copy()
+        if os.path.exists("just_finished_prefill_"+str(self._rank)+".pkl"):
+            with open("just_finished_prefill_"+str(self._rank)+".pkl",'rb') as file:
+                just_finished=pickle.load(file)
         logger.info("finished req ids from prefill")
         print(just_finished)
         just_finished = list(set(just_finished)-set(self.finished_req_ids_prefill))
@@ -683,7 +691,9 @@ class Scheduler(SchedulerInterface):
                 # the previous and the current steps.
                 finished_req_ids=set(just_finished),
             )
-            self.connector.qmgr.q.put(scheduler_output_prefill)
+            #self.connector.qmgr.q.put(scheduler_output_prefill)
+            with open("scheduler_output_prefill_"+str(self._rank)+".pkl",'wb') as file:
+                pickle.dump(scheduler_output_prefill, file)
         
         #if no scheduled tokens, all requests are in prefill
         if num_scheduled_tokens:
@@ -1058,8 +1068,26 @@ class Scheduler(SchedulerInterface):
 
         #update the connector running prefill list
         if self.finished_req_ids:
-            self.connector.gpu_manager.set_list(self.finished_req_ids)
-            #self.finished_req_ids.clear() #this might be necessary if the list grows too large in size. plus if there are errors in model_runner update_states
+            with open("just_finished_prefill_"+str(self._rank)+".pkl",'wb') as file:
+                pickle.dump(self.finished_req_ids,file)
+            #self.connector.gpu_manager.set_list(self.finished_req_ids)
+        return engine_core_outputs
+
+    def handle_finished_requests(self):
+        engine_core_outputs = {}
+
+        finished_req_ids = self.finished_req_ids_dict
+        if finished_req_ids:
+            # Include ids of requests that finished since last outputs
+            # were sent.
+            for client_index, finished_set in finished_req_ids.items():
+                # Set finished request set in EngineCoreOutputs for this client.
+                if (eco := engine_core_outputs.get(client_index)) is not None:
+                    eco.finished_requests = finished_set
+                else:
+                    engine_core_outputs[client_index] = EngineCoreOutputs(
+                        finished_requests=finished_set)
+            finished_req_ids.clear()
         return engine_core_outputs
 
     def update_from_output(

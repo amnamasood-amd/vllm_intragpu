@@ -26,8 +26,8 @@ TIMEOUT_SECONDS=${TIMEOUT_SECONDS:-1200}
 PROXY_PORT=${PROXY_PORT:-50001}
 
 # Default 1P3D configuration (1 Prefill + 3 Decode)
-PREFILL_GPUS=${PREFILL_GPUS:-4}
-DECODE_GPUS=${DECODE_GPUS:-4}
+PREFILL_GPUS=${PREFILL_GPUS:-2}
+DECODE_GPUS=${DECODE_GPUS:-2}
 PREFILL_PORTS=${PREFILL_PORTS:-50003}
 DECODE_PORTS=${DECODE_PORTS:-50005}
 
@@ -167,7 +167,7 @@ main() {
         local kv_port=$((22001 + i))
 
         echo "  Decode server $((i+1)): GPU $gpu_id, Port $port, KV Port $kv_port"
-        VLLM_USE_V1=1 CUDA_VISIBLE_DEVICES=$gpu_id vllm serve $MODEL \
+        VLLM_USE_V1=1 CUDA_VISIBLE_DEVICES=4 vllm serve $MODEL \
         --enforce-eager \
         --host 0.0.0.0 \
         --port $port \
@@ -210,7 +210,7 @@ main() {
         local kv_port=$((21001 + i))
 
         echo "  Prefill server $((i+1)): GPU $gpu_id, Port $port, KV Port $kv_port"
-        CUDA_VISIBLE_DEVICES=$gpu_id VLLM_USE_V1=1 vllm serve $MODEL \
+        CUDA_VISIBLE_DEVICES=4 VLLM_USE_V1=1 vllm serve $MODEL \
         --enforce-eager \
         --host 0.0.0.0 \
         --port $port \
@@ -284,6 +284,9 @@ main() {
     #python3 multi_serve.py --port $PROXY_PORT --model $MODEL
     python3 multi_serve_no_proxy.py --model $MODEL
     cleanup
+    
+    rm /workspace/vllm_intragpu/examples/online_serving/intragpu_serving/just_finished_prefill*.pkl
+    rm /workspace/vllm_intragpu/examples/online_serving/intragpu_serving/scheduler_output_prefill*.pkl
 
     #echo $output1
 }

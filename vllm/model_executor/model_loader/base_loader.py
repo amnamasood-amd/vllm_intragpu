@@ -11,6 +11,8 @@ from vllm.model_executor.model_loader.utils import (
     initialize_model, process_weights_after_loading, set_default_torch_dtype, send_tensor_with_untyped_storage)
 import multiprocessing
 import torch.multiprocessing as mp
+import pickle
+from vllm.distributed.parallel_state import get_world_group
 
 logger = init_logger(__name__)
 
@@ -59,13 +61,19 @@ class BaseModelLoader(ABC):
                 assert connector_q is not None
                 for param in model.parameters():
                     send_tensor_with_untyped_storage(param, self.param_storage_list)
-                connector_q.put(self.param_storage_list)
+                rank = get_world_group().local_rank
+                with open("model_handles_"+str(rank)+".pkl",'wb') as file:
+                    pickle.dump(self.param_storage_list, file)
+                #connector_q.put(self.param_storage_list)
                 #print(len(self.param_storage_list))
             else:
                 assert connector_q is not None
                 logger.info("getting parameter list")
-                self.param_storage_list = connector_q.get()
-                #print(len(self.param_storage_list))
+                #self.param_storage_list = connector_q.get()
+                rank = get_world_group().local_rank
+                with open("model_handles_"+str(rank)+".pkl",'rb') as file:
+                    self.param_storage_list = pickle.load(file)
+                logger.info("length of param_storage_list %d", len(self.param_storage_list))
                 weights=[]
                 for spec in self.param_storage_list:
                     weights.append(mp.reductions.rebuild_cuda_tensor(**spec))
