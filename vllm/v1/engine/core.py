@@ -135,6 +135,10 @@ class EngineCore:
             log_stats=self.log_stats,
         )
 
+        if self.scheduler.connector is not None and self.scheduler.connector.transfer_config.kv_role=="kv_consumer":
+            block_allocation_thread = threading.Thread(target=self.check_for_allocation, daemon=True)
+            block_allocation_thread.start()
+
         self.use_spec_decode = vllm_config.speculative_config is not None
 
         self.mm_registry = mm_registry = MULTIMODAL_REGISTRY
@@ -259,12 +263,40 @@ class EngineCore:
 
         self.scheduler.add_request(request)
 
+        if self.scheduler.connector is not None and self.scheduler.connector.transfer_config.kv_role == "kv_consumer":
+            self.scheduler.add_pendingallocation_request(request)
+
+    def check_for_allocation(self):
+        logger.info("starting block_allocation thread")
+        while True:
+            while self.scheduler.pending_allocation_req_ids:
+                print(self.scheduler.pending_allocation_req_ids)
+                allocated_req_ids = []
+                pending_allocation_req_ids = self.scheduler.pending_allocation_req_ids.copy()
+                for req_id in pending_allocation_req_ids:
+                    if os.path.exists("req_block_data/"+req_id+".pkl"):
+                        try:
+                            with open("req_block_data/"+req_id+".pkl",'rb') as file:
+                                block_ids=pickle.load(file)
+                                self.scheduler.allocated_block_ids[req_id] = block_ids
+                                allocated_req_ids.append(req_id)
+                        except EOFError:
+                            logger.info("EOFError loading block ids, moving on")
+                for req_id in allocated_req_ids:
+                    self.scheduler.pending_allocation_req_ids.remove(req_id)
+            print(self.scheduler.pending_allocation_req_ids)
+            time.sleep(0.1)
+
+
+
+
     def abort_requests(self, request_ids: list[str]):
         """Abort requests from the scheduler."""
 
         # TODO: The scheduler doesn't really need to know the
         # specific finish reason, TBD whether we propagate that
         # (i.e. client-aborted vs stop criteria met).
+        logger.info("aborting request")
         self.scheduler.finish_requests(request_ids,
                                        RequestStatus.FINISHED_ABORTED)
 
@@ -330,70 +362,45 @@ class EngineCore:
             else:
                 return self.scheduler.handle_finished_requests(), False
         else:
-            # scheduler_output = self.scheduler.schedule()
-            # #logger.info("in core calling execute model and checking connector")
-            # #self.scheduler.connector.qmgr.q.put(scheduler_output) #temporary test. this has to shift to scheduler
-            # #print(scheduler_output.kv_connector_metadata)
-            # model_output = self.execute_model_with_error_logging(
-            #     self.model_executor.execute_model,  # type: ignore
-            #     scheduler_output)
-            # engine_core_outputs = self.scheduler.update_from_output(
-            #     scheduler_output, model_output)  # type: ignore
-
-            # while True:
-            #     try:
-            #         scheduler_output = self.scheduler.connector.qmgr.q.get(block=False)
-            #         logger.info("Printing scheduler output")
-            #         print(scheduler_output)
-            #         model_output = self.execute_model_with_error_logging(
-            #             self.model_executor.execute_model,  # type: ignore
-            #             scheduler_output)
-            #         engine_core_outputs = self.scheduler.prefill_update_from_output(
-            #             scheduler_output, model_output)
-            #         break
-            #     except Empty:
-            #         logger.info("no scheduler output available from decode instance")
-            #         time.sleep(1)
-            #         continue
-
-            # scheduler_output = self.scheduler.connector.qmgr.q.get()
-            # logger.info("Printing scheduler output")
-            # print(scheduler_output)
-            # model_output = self.execute_model_with_error_logging(
-            #     self.model_executor.execute_model,  # type: ignore
-            #     scheduler_output)
-            # engine_core_outputs = self.scheduler.prefill_update_from_output(
-            #     scheduler_output, model_output)
-
-            
-            if os.path.exists("scheduler_output_prefill.pkl"): 
-                try:
-                    with open("scheduler_output_prefill.pkl",'rb') as file:
-                        scheduler_output_prefill = pickle.load(file)
-                    #scheduler_output_prefill = self.scheduler.connector.qmgr.q.get_nowait()
-                    current_new_req = [req.req_id for req in scheduler_output_prefill.scheduled_new_reqs]
-                    if current_new_req == self.scheduler_prefill_requests:
-                        return {}, False
-                    else:
-                        logger.info("Printing scheduler output")
-                        scheduler_output=SchedulerOutput.from_scheduleroutputprefill(scheduler_output_prefill)
-                        print(scheduler_output)
-                        meta = self.scheduler.connector.build_connector_meta(scheduler_output)
-                        scheduler_output.kv_connector_metadata = meta
-
-                        model_output = self.execute_model_with_error_logging(
-                            self.model_executor.execute_model,  # type: ignore
-                            scheduler_output)
-                        engine_core_outputs = self.scheduler.prefill_update_from_output(
-                            scheduler_output, model_output)
-                        self.scheduler_prefill_requests=current_new_req
-                except EOFError:
-                    logger.info("caught EOF exception")
-                    time.sleep(0.1)
-                    return {}, False
+            #return {}, True
+            scheduler_output = self.scheduler.prefill_schedule()
+            if scheduler_output:    
+                model_output = self.execute_model_with_error_logging(
+                    self.model_executor.execute_model,  # type: ignore
+                    scheduler_output)
+                engine_core_outputs = self.scheduler.prefill_update_from_output(
+                    scheduler_output, model_output)  # type: ignore
+                print(engine_core_outputs)
             else:
-                    #logger.info("no scheduler output available from decode instance")
-                    return {}, False
+                return {}, False
+            # if os.path.exists("scheduler_output_prefill.pkl"): 
+            #     try:
+            #         with open("scheduler_output_prefill.pkl",'rb') as file:
+            #             scheduler_output_prefill = pickle.load(file)
+            #         #scheduler_output_prefill = self.scheduler.connector.qmgr.q.get_nowait()
+            #         current_new_req = [req.req_id for req in scheduler_output_prefill.scheduled_new_reqs]
+            #         if current_new_req == self.scheduler_prefill_requests:
+            #             return {}, False
+            #         else:
+            #             logger.info("Printing scheduler output")
+            #             scheduler_output=SchedulerOutput.from_scheduleroutputprefill(scheduler_output_prefill)
+            #             print(scheduler_output)
+            #             meta = self.scheduler.connector.build_connector_meta(scheduler_output)
+            #             scheduler_output.kv_connector_metadata = meta
+
+            #             model_output = self.execute_model_with_error_logging(
+            #                 self.model_executor.execute_model,  # type: ignore
+            #                 scheduler_output)
+            #             engine_core_outputs = self.scheduler.prefill_update_from_output(
+            #                 scheduler_output, model_output)
+            #             self.scheduler_prefill_requests=current_new_req
+            #     except EOFError:
+            #         logger.info("caught EOF exception")
+            #         time.sleep(0.1)
+            #         return {}, False
+            # else:
+            #         #logger.info("no scheduler output available from decode instance")
+            #         return {}, False
 
             # scheduler_output = self.scheduler.connector.gpu_manager.get_sched_out()
             # logger.info("Printing scheduler output")

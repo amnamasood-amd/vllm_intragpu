@@ -374,6 +374,15 @@ class KVCacheManager:
         """Get the blocks of a request."""
         return KVCacheBlocks(self.coordinator.get_blocks(request_id))
 
+    # def get_blocks(self, request_id:str, num_new_tokens:int) -> KVCacheBlocks:
+    #     all_blocks=self.coordinator.get_blocks(request_id)
+    #     assert self.block_size is not None
+    #     num_blocks=-(-num_new_tokens//self.block_size)
+    #     #for block in all_blocks:
+    #     new_block = tuple(block[-num_blocks:] for block in all_blocks)
+    #     return KVCacheBlocks(new_block)
+
+
     def get_block_ids(self, request_id: str) -> tuple[list[int], ...]:
         """Get the block ids of a request."""
         return self.get_blocks(request_id).get_block_ids()
@@ -385,5 +394,4 @@ class KVCacheManager:
 
     def create_empty_block_list(self) -> KVCacheBlocks:
         """Creates a new KVCacheBlocks instance with no blocks."""
-        return KVCacheBlocks(tuple([]
-                                   for _ in range(self.num_kv_cache_groups)))
+        return KVCacheBlocks(tuple([] for _ in range(self.num_kv_cache_groups)))

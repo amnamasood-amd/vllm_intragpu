@@ -167,7 +167,7 @@ main() {
         local kv_port=$((22001 + i))
 
         echo "  Decode server $((i+1)): GPU $gpu_id, Port $port, KV Port $kv_port"
-        VLLM_USE_V1=1 CUDA_VISIBLE_DEVICES=4,5 vllm serve $MODEL \
+        VLLM_USE_V1=1 CUDA_VISIBLE_DEVICES=0,1 vllm serve $MODEL \
         --enforce-eager \
         --host 0.0.0.0 \
         --port $port \
@@ -210,7 +210,7 @@ main() {
         local kv_port=$((21001 + i))
 
         echo "  Prefill server $((i+1)): GPU $gpu_id, Port $port, KV Port $kv_port"
-        CUDA_VISIBLE_DEVICES=4,5 VLLM_USE_V1=1 vllm serve $MODEL \
+        CUDA_VISIBLE_DEVICES=0,1 VLLM_USE_V1=1 vllm serve $MODEL \
         --enforce-eager \
         --host 0.0.0.0 \
         --port $port \

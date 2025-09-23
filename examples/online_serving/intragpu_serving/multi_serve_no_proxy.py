@@ -157,10 +157,10 @@ async def main_async(args: argparse.Namespace):
         )
         counter+=1
         task = limited_request_func_prefill(request_func_input=prefill_test_input)
-        tasks2.append(asyncio.create_task(task))
+        tasks.append(asyncio.create_task(task))
         task = limited_request_func_decode(request_func_input=decode_test_input)
         tasks.append(asyncio.create_task(task))
-    await asyncio.gather(*tasks)
+    #await asyncio.gather(*tasks)
     outputs: list[RequestFuncOutput] = await asyncio.gather(*tasks)
     print(outputs)
     
