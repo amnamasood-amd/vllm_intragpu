@@ -509,41 +509,41 @@ class AiterFlashAttentionImpl(AttentionImpl):
                     v_scale=layer._v_scale,
                     total_tokens=attn_metadata.num_actual_kv_tokens,
                 )
-            else:
-                _, num_heads, head_size = query.shape
-                nbytes_per_qo_elem = torch.finfo(query.dtype).bits // 8
-                num_seqs = seqused_k.shape[0]
-                max_num_partitions = (max_seqlen_k + _PARTITION_SIZE_ROCM -
-                                      1) // _PARTITION_SIZE_ROCM
+            
+            _, num_heads, head_size = query.shape
+            nbytes_per_qo_elem = torch.finfo(query.dtype).bits // 8
+            num_seqs = seqused_k.shape[0]
+            max_num_partitions = (max_seqlen_k + _PARTITION_SIZE_ROCM -
+                                   1) // _PARTITION_SIZE_ROCM
 
-                workspace_buffer = torch.empty(
-                    (num_seqs * num_heads * max_num_partitions * head_size) *
-                    nbytes_per_qo_elem + 2 *
-                    (num_seqs * num_heads * max_num_partitions) * 4,
-                    dtype=torch.uint8,
-                    device=output.device,
-                )
+            workspace_buffer = torch.empty(
+                (num_seqs * num_heads * max_num_partitions * head_size) *
+                nbytes_per_qo_elem + 2 *
+                (num_seqs * num_heads * max_num_partitions) * 4,
+                dtype=torch.uint8,
+                device=output.device,
+            )
 
-                torch.ops.aiter.paged_attention_v1(
-                    output[:num_actual_tokens],
-                    workspace_buffer,
-                    query[:num_actual_tokens],
-                    key_cache,
-                    value_cache,
-                    self.scale,
-                    block_table,
-                    cu_seqlens_q,
-                    seqused_k,
-                    max_seqlen_k,
-                    self.alibi_slopes,
-                    self.kv_cache_dtype,
-                    "NHD",
-                    self.logits_soft_cap,
-                    layer._k_scale,
-                    layer._v_scale,
-                    None,
-                    _PARTITION_SIZE_ROCM,
-                )
+            torch.ops.aiter.paged_attention_v1(
+                output[:num_actual_tokens],
+                workspace_buffer,
+                query[:num_actual_tokens],
+                key_cache,
+                value_cache,
+                self.scale,
+                block_table,
+                cu_seqlens_q,
+                seqused_k,
+                max_seqlen_k,
+                self.alibi_slopes,
+                self.kv_cache_dtype,
+                "NHD",
+                self.logits_soft_cap,
+                layer._k_scale,
+                layer._v_scale,
+                None,
+                _PARTITION_SIZE_ROCM,
+            )
             return output
         else:
             raise NotImplementedError(

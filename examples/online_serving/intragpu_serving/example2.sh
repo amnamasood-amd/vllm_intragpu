@@ -144,10 +144,10 @@ main() {
     # =============================================================================
     # Launch Proxy Server
     # =============================================================================
-    echo ""
-    echo "Starting proxy server on port $PROXY_PORT..."
-    python3 disagg_proxy.py &
-    PIDS+=($!)
+    # echo ""
+    # echo "Starting proxy server on port $PROXY_PORT..."
+    # python3 disagg_proxy.py &
+    # PIDS+=($!)
 
     # Parse GPU and port arrays
     IFS=',' read -ra PREFILL_GPU_ARRAY <<< "$PREFILL_GPUS"
@@ -261,13 +261,13 @@ main() {
     # =============================================================================
     # Run Benchmark
     # =============================================================================
-    cd ../../../benchmarks/
-    vllm bench serve --port 10002 --seed $(date +%s) \
-        --model $MODEL \
-        --dataset-name random --random-input-len 100 --random-output-len 20 \
-        --num-prompts 10 --burstiness 100 --request-rate 2 | tee benchmark.log
+    # cd ../../../benchmarks/
+    # vllm bench serve --port 10002 --seed $(date +%s) \
+    #     --model $MODEL \
+    #     --dataset-name random --random-input-len 100 --random-output-len 20 \
+    #     --num-prompts 10 --burstiness 100 --request-rate 2 | tee benchmark.log
     
-    echo "Benchmarking done. Cleaning up..."
+    # echo "Benchmarking done. Cleaning up..."
 
     
     # output1=$(curl -X POST -s http://localhost:$PROXY_PORT/v1/completions \
@@ -282,7 +282,7 @@ main() {
 
     #python3 single_serve.py --port $PROXY_PORT --model $MODEL
     #python3 multi_serve.py --port 10001 --model $MODEL
-    #python3 multi_serve_no_proxy.py --model $MODEL
+    python3 multi_serve_no_proxy.py --model $MODEL
     rm /workspace/vllm_intragpu/examples/online_serving/intragpu_serving/*.pkl
     cleanup
     
