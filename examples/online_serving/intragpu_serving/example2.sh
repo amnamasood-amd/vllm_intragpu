@@ -283,9 +283,10 @@ main() {
     #python3 single_serve.py --port $PROXY_PORT --model $MODEL
     #python3 multi_serve.py --port 10001 --model $MODEL
     #python3 multi_serve_no_proxy.py --model $MODEL
+    rm /workspace/vllm_intragpu/examples/online_serving/intragpu_serving/*.pkl
     cleanup
     
-    rm /workspace/vllm_intragpu/examples/online_serving/intragpu_serving/*.pkl
+    
     #rm /workspace/vllm_intragpu/examples/online_serving/intragpu_serving/scheduler_output_prefill*.pkl
 
     #echo $output1

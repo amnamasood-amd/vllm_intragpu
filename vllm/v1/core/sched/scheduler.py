@@ -214,8 +214,12 @@ class Scheduler(SchedulerInterface):
 
         just_finished = [] #self.connector.gpu_manager.get_list().copy()
         if os.path.exists("just_finished_prefill.pkl"):
-            with open("just_finished_prefill.pkl",'rb') as file:
-                just_finished=pickle.load(file)
+            try:
+                with open("just_finished_prefill.pkl",'rb') as file:
+                    just_finished=pickle.load(file)
+            except EOFError:
+                logger.info("EOFError loading finished_prefill ids")
+                just_finished=self.finished_req_ids_prefill.copy()
         logger.info("finished req ids from prefill")
         print(just_finished)
         just_finished = list(set(just_finished)-set(self.finished_req_ids_prefill))
@@ -352,11 +356,13 @@ class Scheduler(SchedulerInterface):
             # Schedule the request.
             if num_new_tokens > 1:  #represents the already running prefill
                 scheduled_running_reqs_prefill.append(request)
+                #scheduled_new_reqs_prefill.append(request) #adding to new requests in case scheduler_output_prefill file is overwritten before it was read and to avoid missing requests
+                #req_to_new_blocks[request.request_id] = (self.kv_cache_manager.get_blocks(request.request_id))
             elif not finished_prefill: #running decode
                 scheduled_running_reqs.append(request)
                 req_to_new_blocks[request.request_id] = new_blocks
                 num_scheduled_tokens[request.request_id] = num_new_tokens
-            else: #requests that just finished decode
+            else: #requests that just finished prefill
                 scheduled_new_reqs.append(request)
                 req_to_new_blocks[request.request_id] = (self.kv_cache_manager.get_blocks(request.request_id)) #does assigning new_blocks here assume that model runner already knows existing blocks? that wouldnt be true for prefill requests that just finished
                 num_scheduled_tokens[request.request_id] = num_new_tokens
