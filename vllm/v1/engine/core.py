@@ -366,27 +366,31 @@ class EngineCore:
             #     scheduler_output, model_output)
 
             
-            
-            if os.path.exists("scheduler_output_prefill_"+str(self.scheduler._rank)+".pkl"): 
-                with open("scheduler_output_prefill_"+str(self.scheduler._rank)+".pkl",'rb') as file:
-                    scheduler_output_prefill = pickle.load(file)
-                #scheduler_output_prefill = self.scheduler.connector.qmgr.q.get_nowait()
-                current_new_req = [req.req_id for req in scheduler_output_prefill.scheduled_new_reqs]
-                if current_new_req == self.scheduler_prefill_requests:
-                    return {}, False
-                else:
-                    logger.info("Printing scheduler output")
-                    scheduler_output=SchedulerOutput.from_scheduleroutputprefill(scheduler_output_prefill)
-                    print(scheduler_output)
-                    meta = self.scheduler.connector.build_connector_meta(scheduler_output)
-                    scheduler_output.kv_connector_metadata = meta
+            if os.path.exists("scheduler_output_prefill.pkl"): 
+                try:
+                    with open("scheduler_output_prefill.pkl",'rb') as file:
+                        scheduler_output_prefill = pickle.load(file)
+                    #scheduler_output_prefill = self.scheduler.connector.qmgr.q.get_nowait()
+                    current_new_req = [req.req_id for req in scheduler_output_prefill.scheduled_new_reqs]
+                    if current_new_req == self.scheduler_prefill_requests:
+                        return {}, False
+                    else:
+                        logger.info("Printing scheduler output")
+                        scheduler_output=SchedulerOutput.from_scheduleroutputprefill(scheduler_output_prefill)
+                        print(scheduler_output)
+                        meta = self.scheduler.connector.build_connector_meta(scheduler_output)
+                        scheduler_output.kv_connector_metadata = meta
 
-                    model_output = self.execute_model_with_error_logging(
-                        self.model_executor.execute_model,  # type: ignore
-                        scheduler_output)
-                    engine_core_outputs = self.scheduler.prefill_update_from_output(
-                        scheduler_output, model_output)
-                    self.scheduler_prefill_requests=current_new_req
+                        model_output = self.execute_model_with_error_logging(
+                            self.model_executor.execute_model,  # type: ignore
+                            scheduler_output)
+                        engine_core_outputs = self.scheduler.prefill_update_from_output(
+                            scheduler_output, model_output)
+                        self.scheduler_prefill_requests=current_new_req
+                except EOFError:
+                    logger.info("caught EOF exception")
+                    time.sleep(0.1)
+                    return {}, False
             else:
                     #logger.info("no scheduler output available from decode instance")
                     return {}, False

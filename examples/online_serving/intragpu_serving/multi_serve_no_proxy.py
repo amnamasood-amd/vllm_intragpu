@@ -122,6 +122,7 @@ async def main_async(args: argparse.Namespace):
 
     test_prompts=[50*"San Francisco is a " for i in range(5)]
     tasks: list[asyncio.Task] = []
+    tasks2: list[asyncio.Task] = []
     counter=0
     for test_prompt in test_prompts:
         test_prompt_len = len(test_prompt)
@@ -156,9 +157,10 @@ async def main_async(args: argparse.Namespace):
         )
         counter+=1
         task = limited_request_func_prefill(request_func_input=prefill_test_input)
-        tasks.append(asyncio.create_task(task))
+        tasks2.append(asyncio.create_task(task))
         task = limited_request_func_decode(request_func_input=decode_test_input)
         tasks.append(asyncio.create_task(task))
+    await asyncio.gather(*tasks)
     outputs: list[RequestFuncOutput] = await asyncio.gather(*tasks)
     print(outputs)
     

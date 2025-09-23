@@ -173,7 +173,8 @@ class Scheduler(SchedulerInterface):
         #self.connector.initialize_gpu_manager()
         self.use_pp = self.parallel_config.pipeline_parallel_size > 1
 
-        self._rank = get_world_group().local_rank
+        self._rank = 0
+        #self._rank = get_world_group().local_rank
 
     def schedule(self) -> SchedulerOutput:
         # NOTE(woosuk) on the scheduling algorithm:
@@ -186,7 +187,9 @@ class Scheduler(SchedulerInterface):
         # num_tokens_with_spec. This is general enough to cover
         # chunked prefills, prefix caching, speculative decoding,
         # and the "jump decoding" optimization in the future.
+        
         logger.info("Scheduling")
+        #self._rank = get_world_group().local_rank
         if self.connector is not None:
             logger.info("scheduler connector exists")
         scheduled_new_reqs: list[Request] = []
@@ -210,8 +213,8 @@ class Scheduler(SchedulerInterface):
         num_scheduled_tokens_prefill: dict[str, int] = {}
 
         just_finished = [] #self.connector.gpu_manager.get_list().copy()
-        if os.path.exists("just_finished_prefill_"+str(self._rank)+".pkl"):
-            with open("just_finished_prefill_"+str(self._rank)+".pkl",'rb') as file:
+        if os.path.exists("just_finished_prefill.pkl"):
+            with open("just_finished_prefill.pkl",'rb') as file:
                 just_finished=pickle.load(file)
         logger.info("finished req ids from prefill")
         print(just_finished)
@@ -692,7 +695,7 @@ class Scheduler(SchedulerInterface):
                 finished_req_ids=set(just_finished),
             )
             #self.connector.qmgr.q.put(scheduler_output_prefill)
-            with open("scheduler_output_prefill_"+str(self._rank)+".pkl",'wb') as file:
+            with open("scheduler_output_prefill.pkl",'wb') as file:
                 pickle.dump(scheduler_output_prefill, file)
         
         #if no scheduled tokens, all requests are in prefill
@@ -1068,7 +1071,7 @@ class Scheduler(SchedulerInterface):
 
         #update the connector running prefill list
         if self.finished_req_ids:
-            with open("just_finished_prefill_"+str(self._rank)+".pkl",'wb') as file:
+            with open("just_finished_prefill.pkl",'wb') as file:
                 pickle.dump(self.finished_req_ids,file)
             #self.connector.gpu_manager.set_list(self.finished_req_ids)
         return engine_core_outputs

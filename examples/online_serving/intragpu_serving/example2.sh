@@ -144,10 +144,10 @@ main() {
     # =============================================================================
     # Launch Proxy Server
     # =============================================================================
-    #echo ""
-    #echo "Starting proxy server on port $PROXY_PORT..."
-    #python3 disagg_proxy_p2p_nccl_xpyd.py &
-    #PIDS+=($!)
+    echo ""
+    echo "Starting proxy server on port $PROXY_PORT..."
+    python3 disagg_proxy.py &
+    PIDS+=($!)
 
     # Parse GPU and port arrays
     IFS=',' read -ra PREFILL_GPU_ARRAY <<< "$PREFILL_GPUS"
@@ -167,11 +167,11 @@ main() {
         local kv_port=$((22001 + i))
 
         echo "  Decode server $((i+1)): GPU $gpu_id, Port $port, KV Port $kv_port"
-        VLLM_USE_V1=1 CUDA_VISIBLE_DEVICES=4 vllm serve $MODEL \
+        VLLM_USE_V1=1 CUDA_VISIBLE_DEVICES=4,5 vllm serve $MODEL \
         --enforce-eager \
         --host 0.0.0.0 \
         --port $port \
-        --tensor-parallel-size 1 \
+        --tensor-parallel-size 2 \
         --seed 1024 \
         --dtype float16 \
         --max-model-len 8192 \
@@ -210,11 +210,11 @@ main() {
         local kv_port=$((21001 + i))
 
         echo "  Prefill server $((i+1)): GPU $gpu_id, Port $port, KV Port $kv_port"
-        CUDA_VISIBLE_DEVICES=4 VLLM_USE_V1=1 vllm serve $MODEL \
+        CUDA_VISIBLE_DEVICES=4,5 VLLM_USE_V1=1 vllm serve $MODEL \
         --enforce-eager \
         --host 0.0.0.0 \
         --port $port \
-        --tensor-parallel-size 1 \
+        --tensor-parallel-size 2 \
         --seed 1024 \
         --dtype float16 \
         --max-model-len 8192 \
@@ -261,13 +261,13 @@ main() {
     # =============================================================================
     # Run Benchmark
     # =============================================================================
-    #cd ../../../benchmarks/
-    #vllm bench serve --port $PROXY_PORT --seed $(date +%s) \
-    #    --model $MODEL \
-    #    --dataset-name random --random-input-len 7500 --random-output-len 200 \
-    #    --num-prompts 100 --burstiness 100 --request-rate 100 | tee benchmark.log
+    cd ../../../benchmarks/
+    vllm bench serve --port 10002 --seed $(date +%s) \
+        --model $MODEL \
+        --dataset-name random --random-input-len 100 --random-output-len 20 \
+        --num-prompts 10 --burstiness 100 --request-rate 2 | tee benchmark.log
     
-    #echo "Benchmarking done. Cleaning up..."
+    echo "Benchmarking done. Cleaning up..."
 
     
     # output1=$(curl -X POST -s http://localhost:$PROXY_PORT/v1/completions \
@@ -281,12 +281,12 @@ main() {
     # echo $output1
 
     #python3 single_serve.py --port $PROXY_PORT --model $MODEL
-    #python3 multi_serve.py --port $PROXY_PORT --model $MODEL
-    python3 multi_serve_no_proxy.py --model $MODEL
+    #python3 multi_serve.py --port 10001 --model $MODEL
+    #python3 multi_serve_no_proxy.py --model $MODEL
     cleanup
     
-    rm /workspace/vllm_intragpu/examples/online_serving/intragpu_serving/just_finished_prefill*.pkl
-    rm /workspace/vllm_intragpu/examples/online_serving/intragpu_serving/scheduler_output_prefill*.pkl
+    rm /workspace/vllm_intragpu/examples/online_serving/intragpu_serving/*.pkl
+    #rm /workspace/vllm_intragpu/examples/online_serving/intragpu_serving/scheduler_output_prefill*.pkl
 
     #echo $output1
 }

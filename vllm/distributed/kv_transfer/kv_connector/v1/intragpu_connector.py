@@ -168,8 +168,8 @@ class IntraGPUConnector(KVConnectorBase_V1):
         self.qmgr = queue_manager()
         self.running_prefill=[] #self.qmgr.base_manager.list([])
         self.gpu_manager=None
-        self._rank = get_world_group().local_rank
-        logger.info("kv connector local rank %d", self._rank)
+        #self._rank = get_world_group().local_rank
+        #logger.info("kv connector local rank %d", self._rank)
 
         #self.base_manager=SyncManager()
         """

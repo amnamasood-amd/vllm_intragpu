@@ -47,7 +47,7 @@ def parse_args():
     parser.add_argument(
         "--port",
         type=int,
-        default=8000,
+        default=50001,
         help="Port to run the server on (default: 8000)",
     )
     parser.add_argument(
@@ -223,12 +223,12 @@ def main():
         
 
         # Enqueue request or reject if queue is full
-        if not await request_queue.enqueue(task1):
-            return Response(
-                response=b'{"error": "Prefill Server busy, try again later"}',
-                status=503,
-                content_type="application/json",
-            )
+        #if not await request_queue.enqueue(task1):
+        #    return Response(
+        #        response=b'{"error": "Prefill Server busy, try again later"}',
+        #        status=503,
+        #        content_type="application/json",
+        #    )
         task2 = asyncio.create_task(process_request_decode())
         if not await request_queue.enqueue(task2):
             return Response(
@@ -239,7 +239,7 @@ def main():
 
         try:
             # Return the response from the processing task
-            r1 = await task1
+            r2 = await task2
         except asyncio.CancelledError:
             # Handle task cancellation (timeout or queue full)
             logger.warning("Prefill Request cancelled due to timeout or queue full")
@@ -249,20 +249,20 @@ def main():
                 content_type="application/json",
             )
 
-        try:
-            # Return the response from the processing task
-            r2 = await task2
-        except asyncio.CancelledError:
-            # Handle task cancellation (timeout or queue full)
-            logger.warning("Decode Request cancelled due to timeout or queue full")
-            return Response(
-                response=b'{"error": "Request cancelled"}',
-                status=503,
-                content_type="application/json",
-            )
-        print(r1)
-        print(r2)    
-        return r1
+        #try:
+        #    # Return the response from the processing task
+        #    r2 = await task2
+        #except asyncio.CancelledError:
+        #    # Handle task cancellation (timeout or queue full)
+        #    logger.warning("Decode Request cancelled due to timeout or queue full")
+        #    return Response(
+        #        response=b'{"error": "Request cancelled"}',
+        #        status=503,
+        #        content_type="application/json",
+        #    )
+        print(r2)
+        #print(r2)    
+        return r2
 
     # Start the Quart server with host can be set to 0.0.0.0
     app.run(port=PORT)
