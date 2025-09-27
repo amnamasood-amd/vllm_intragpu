@@ -17,6 +17,8 @@ from vllm.logger import init_logger
 if TYPE_CHECKING:
     from vllm.attention.backends.abstract import AttentionMetadata
 
+
+
 logger = init_logger(__name__)
 
 track_batchsize: bool = envs.VLLM_LOG_BATCHSIZE_INTERVAL >= 0
@@ -178,6 +180,8 @@ class ForwardContext:
     cudagraph_runtime_mode: CUDAGraphMode = CUDAGraphMode.NONE
     batch_descriptor: Optional[BatchDescriptor] = None
 
+    cuda_stream: torch.cuda.Stream = None
+
     def __post_init__(self):
         assert self.cudagraph_runtime_mode in [
             CUDAGraphMode.NONE, CUDAGraphMode.PIECEWISE, CUDAGraphMode.FULL], \
@@ -203,7 +207,8 @@ def set_forward_context(
         num_tokens: Optional[int] = None,
         num_tokens_across_dp: Optional[torch.Tensor] = None,
         cudagraph_runtime_mode: CUDAGraphMode = CUDAGraphMode.NONE,
-        batch_descriptor: Optional[BatchDescriptor] = None):
+        batch_descriptor: Optional[BatchDescriptor] = None,
+        cuda_stream: torch.cuda.Stream = None):
     """A context manager that stores the current forward context,
     can be attention metadata, etc.
     Here we can inject common logic for every model forward pass.
@@ -229,6 +234,7 @@ def set_forward_context(
         dp_metadata=dp_metadata,
         cudagraph_runtime_mode=cudagraph_runtime_mode,
         batch_descriptor=batch_descriptor,
+        cuda_stream=cuda_stream,
     )
 
     try:

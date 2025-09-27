@@ -87,7 +87,7 @@ from vllm.v1.worker.lora_model_runner_mixin import LoRAModelRunnerMixin
 from .utils import (AttentionGroup, MultiModalBudget,
                     add_kv_sharing_layers_to_kv_cache_groups, bind_kv_cache,
                     gather_mm_placeholders, sanity_check_mm_encoder_outputs,
-                    scatter_mm_placeholders)
+                    scatter_mm_placeholders, int_to_maskarr, stream_with_cu_mask)
 
 if TYPE_CHECKING:
     import xgrammar as xgr
@@ -123,6 +123,7 @@ class GPUModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
         self.scheduler_config = vllm_config.scheduler_config
         self.speculative_config = vllm_config.speculative_config
         self.observability_config = vllm_config.observability_config
+        self.kv_transfer_config = vllm_config.kv_transfer_config
 
         from vllm.model_executor.models.utils import set_cpu_offload_max_bytes
         set_cpu_offload_max_bytes(
@@ -326,6 +327,19 @@ class GPUModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
             dtype=torch.int64,
             device="cpu",
             pin_memory=self.pin_memory)
+
+        
+        self.n_cu=304
+        self.decode_cu=128
+        self.mask_words=(self.n_cu + 31) // 32
+        decode_mask_int=(1 << self.decode_cu) - 1
+        if self.kv_transfer_config.kv_role == "kv_producer":
+            self.cu_mask_int=decode_mask_int
+        else:
+            self.cu_mask_int=((1 << self.n_cu) - 1) ^ decode_mask_int
+        #self.cu_mask=int_to_maskarr(self.cu_mask_int, self.mask_words)
+        #self.model_stream=stream_with_cu_mask(self.cu_mask)
+        self.model_stream=None
 
     def _make_buffer(self, *args, dtype: torch.dtype) -> CpuGpuBuffer:
         return CpuGpuBuffer(*args,
@@ -1572,6 +1586,7 @@ class GPUModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
                 num_tokens_across_dp=num_tokens_across_dp,
                 cudagraph_runtime_mode=cudagraph_runtime_mode,
                 batch_descriptor=batch_descriptor,
+                cuda_stream=self.model_stream,
         ), self.maybe_get_kv_connector_output(
                 scheduler_output) as kv_connector_output:
 

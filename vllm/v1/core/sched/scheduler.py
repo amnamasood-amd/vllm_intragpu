@@ -174,10 +174,10 @@ class Scheduler(SchedulerInterface):
 
         self.pending_allocation_req_ids: list[str] = []
         self.allocated_block_ids: dict[str,KVCacheBlocks] = {}
-        #self.allocated_req_ids: list[str] = []
+        self.allocated_req_ids: list[str] = []
 
     def prefill_schedule(self) -> SchedulerOutput:   
-        logger.info("Prefill Scheduling")
+        #logger.info("Prefill Scheduling")
         scheduled_new_reqs: list[Request] = []
         scheduled_resumed_reqs: list[Request] = []
         scheduled_running_reqs: list[Request] = []
@@ -223,7 +223,7 @@ class Scheduler(SchedulerInterface):
             #allocated_blocks=self.allocated_block_ids[request.request_id]
             #new_blocks = KVCacheBlocks(tuple(block[-num_new_blocks:] for block in allocated_blocks.blocks))
             new_blocks=self.kv_cache_manager.create_empty_block_list()
-            print(new_blocks)
+            #print(new_blocks)
             req_to_new_blocks[request.request_id]=new_blocks
             num_scheduled_tokens[request.request_id] = num_new_tokens
             token_budget -= num_new_tokens
@@ -336,12 +336,12 @@ class Scheduler(SchedulerInterface):
         num_common_prefix_blocks = [0] * len(
             self.kv_cache_config.kv_cache_groups)
     
-        logger.info("Printing num_scheduled_tokens")
-        print(num_scheduled_tokens)
-        logger.info("Printing scheduled_running_reqs")
-        print([req.request_id for req in scheduled_running_reqs])
-        logger.info("Printing scheduled_new_reqs")
-        print([req.request_id for req in scheduled_new_reqs])
+        #logger.info("Printing num_scheduled_tokens")
+        #print(num_scheduled_tokens)
+        #logger.info("Printing scheduled_running_reqs")
+        #print([req.request_id for req in scheduled_running_reqs])
+        #logger.info("Printing scheduled_new_reqs")
+        #print([req.request_id for req in scheduled_new_reqs])
         
         #if no scheduled tokens, all requests are in prefill
         if num_scheduled_tokens:
@@ -358,8 +358,8 @@ class Scheduler(SchedulerInterface):
                 scheduled_spec_decode_tokens,
                 req_to_new_blocks,
             )
-            logger.info("Cached req data")
-            print(cached_reqs_data)
+            #logger.info("Cached req data")
+            #print(cached_reqs_data)
 
             structured_output_request_ids, grammar_bitmask = (
                 self.get_grammar_bitmask(self.running,
@@ -382,7 +382,7 @@ class Scheduler(SchedulerInterface):
                 structured_output_request_ids=structured_output_request_ids,
                 grammar_bitmask=grammar_bitmask,
             )
-            print(scheduler_output)
+            #print(scheduler_output)
         else:
             return None
         
@@ -413,7 +413,7 @@ class Scheduler(SchedulerInterface):
         # chunked prefills, prefix caching, speculative decoding,
         # and the "jump decoding" optimization in the future.
         
-        logger.info("Decode Scheduling")
+        #logger.info("Decode Scheduling")
         scheduled_new_reqs: list[Request] = []
         scheduled_resumed_reqs: list[Request] = []
         scheduled_running_reqs: list[Request] = []
@@ -442,12 +442,12 @@ class Scheduler(SchedulerInterface):
             except EOFError:
                 logger.info("EOFError loading finished_prefill ids")
                 just_finished=self.finished_req_ids_prefill.copy()
-        logger.info("finished req ids from prefill")
-        print(just_finished)
+        #logger.info("finished req ids from prefill")
+        #print(just_finished)
         just_finished = list(set(just_finished)-set(self.finished_req_ids_prefill))
-        logger.info("just finished_req_ids_prefill")
-        print(just_finished) #add to new running scheduled requests
-        print("token_budget ", token_budget)
+        #logger.info("just finished_req_ids_prefill")
+        #print(just_finished) #add to new running scheduled requests
+        #print("token_budget ", token_budget)
 
         # For logging.
         scheduled_timestamp = time.monotonic()
@@ -455,13 +455,15 @@ class Scheduler(SchedulerInterface):
         # First, schedule the RUNNING requests.
         req_index = 0
         while req_index < len(self.running) and token_budget > 0: 
+            if len(scheduled_running_reqs) + len(scheduled_new_reqs) >= self.max_num_running_reqs:
+                break
+            
             request = self.running[req_index]
             finished_prefill = False
 
             if request.request_id in just_finished:
                 #update request num computed tokens
                 logger.info("Prefill request %s finished with num_output_placeholders %d", request.request_id, request.num_output_placeholders)
-                print(request.request_id)
                 request.num_computed_tokens = request.num_prompt_tokens - 1
                 #request.num_output_placeholders += 1
                 finished_prefill=True
@@ -510,7 +512,7 @@ class Scheduler(SchedulerInterface):
                     scheduled_running_reqs_prefill.append(request)
                     break
                 else: #decode request
-                    print("Allocating blocks for request ", request.request_id)
+                    #print("Allocating blocks for request ", request.request_id)
                     new_blocks = self.kv_cache_manager.allocate_slots(
                         request,
                         num_new_tokens,
@@ -579,8 +581,8 @@ class Scheduler(SchedulerInterface):
         # Next, schedule the WAITING requests.
         if not preempted_reqs:
             while self.waiting and token_budget > 0:
-                if len(self.running)-len(self.running_prefill) == self.max_num_running_reqs:
-                    break
+                #if len(self.running)-len(self.running_prefill) == self.max_num_running_reqs:
+                #    break
 
                 request = self.waiting.peek_request()
 
@@ -693,10 +695,16 @@ class Scheduler(SchedulerInterface):
                     #scheduled_new_reqs.append(request)
                     if num_new_tokens>1:
                         scheduled_new_reqs_prefill.append(request)
-                        with open("req_block_data/"+request.request_id+".pkl",'wb') as file:
-                            pickle.dump((self.kv_cache_manager.get_blocks(request.request_id)), file)
+                        self.allocated_block_ids[request.request_id]=self.kv_cache_manager.get_blocks(request.request_id)
+                        #self.pending_allocation_req_ids.remove(request.request_id)
+                        self.allocated_req_ids.append(request.request_id)
+                        #with open("req_block_data/"+request.request_id+".pkl",'wb') as file:
+                        #    pickle.dump((self.kv_cache_manager.get_blocks(request.request_id)), file)
                     else:
                         scheduled_new_reqs.append(request)
+                        logger.info("should not be scheduling decode requests here")
+                        #if len(scheduled_running_reqs) + len(scheduled_new_reqs) >= self.max_num_running_reqs:
+                        #    break
                 elif request.status == RequestStatus.PREEMPTED:
                     #scheduled_resumed_reqs.append(request)
                     logger.info("should not be in resumed req")
@@ -733,7 +741,8 @@ class Scheduler(SchedulerInterface):
         total_num_scheduled_tokens = sum(num_scheduled_tokens.values())
         assert total_num_scheduled_tokens <= self.max_num_scheduled_tokens
         assert token_budget >= 0
-        assert len(self.running)-len(self.running_prefill) <= self.max_num_running_reqs
+        #assert len(self.running)-len(self.running_prefill) <= self.max_num_running_reqs
+        assert len(scheduled_new_reqs)+len(scheduled_running_reqs) <= self.max_num_running_reqs
         # Since some requests in the RUNNING queue may not be scheduled in
         # this step, the total number of scheduled requests can be smaller than
         # len(self.running).
@@ -746,18 +755,18 @@ class Scheduler(SchedulerInterface):
             self.kv_cache_config.kv_cache_groups)
     
         #for prefill
-        logger.info("Printing num_scheduled_tokens_prefill")
-        print(num_scheduled_tokens_prefill)
-        logger.info("Printing scheduled_running_reqs_prefill")
-        print([req.request_id for req in scheduled_running_reqs_prefill])
-        logger.info("Printing scheduled_new_reqs_prefill")
-        print([req.request_id for req in scheduled_new_reqs_prefill])
-        logger.info("Printing num_scheduled_tokens")
-        print(num_scheduled_tokens)
-        logger.info("Printing scheduled_running_reqs")
-        print([req.request_id for req in scheduled_running_reqs])
-        logger.info("Printing scheduled_new_reqs")
-        print([req.request_id for req in scheduled_new_reqs])
+        # logger.info("Printing num_scheduled_tokens_prefill")
+        # print(num_scheduled_tokens_prefill)
+        # logger.info("Printing scheduled_running_reqs_prefill")
+        # print([req.request_id for req in scheduled_running_reqs_prefill])
+        # logger.info("Printing scheduled_new_reqs_prefill")
+        # print([req.request_id for req in scheduled_new_reqs_prefill])
+        # logger.info("Printing num_scheduled_tokens")
+        # print(num_scheduled_tokens)
+        # logger.info("Printing scheduled_running_reqs")
+        # print([req.request_id for req in scheduled_running_reqs])
+        # logger.info("Printing scheduled_new_reqs")
+        # print([req.request_id for req in scheduled_new_reqs])
         # if scheduled_new_reqs_prefill: #checking new_reqs for now, but should probably be running requests
         #     logger.info("Creating scheduleroutputprefill")
         #     new_reqs_data_prefill = [
@@ -807,8 +816,8 @@ class Scheduler(SchedulerInterface):
                 scheduled_spec_decode_tokens,
                 req_to_new_blocks,
             )
-            logger.info("Cached req data")
-            print(cached_reqs_data)
+            #logger.info("Cached req data")
+            #print(cached_reqs_data)
 
             structured_output_request_ids, grammar_bitmask = (
                 self.get_grammar_bitmask(self.running,
@@ -831,7 +840,7 @@ class Scheduler(SchedulerInterface):
                 structured_output_request_ids=structured_output_request_ids,
                 grammar_bitmask=grammar_bitmask,
             )
-            print(scheduler_output)
+            #print(scheduler_output)
         else:
             return None
         
@@ -840,7 +849,7 @@ class Scheduler(SchedulerInterface):
         # 2. Wrap up all the KV cache load / save ops into an opaque object
         # 3. Clear the internal states of the connector
         if self.connector is not None:
-            logger.info("building scheduler metadata, shoudl be empty")
+            #logger.info("building scheduler metadata, shoudl be empty")
             meta = self.connector.build_connector_meta(scheduler_output)
             scheduler_output.kv_connector_metadata = meta
 
@@ -1106,8 +1115,6 @@ class Scheduler(SchedulerInterface):
 
             new_token_ids = generated_token_ids
 
-            logger.info("new token ids")
-            print(new_token_ids)
             stopped = False
             if new_token_ids:
                 new_token_ids, stopped = self._update_request_with_output(

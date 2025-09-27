@@ -109,6 +109,15 @@ app = Quart(__name__)
 def random_uuid() -> str:
     return str(uuid.uuid4().hex)
 
+async def forward_request_prefill(url, data, request_id):
+    #print(url)
+    async with aiohttp.ClientSession(timeout=AIOHTTP_TIMEOUT) as session:
+        headers = {
+            "X-Request-Id": request_id,
+        }
+        async with session.post(url=url, json=data, headers=headers) as response:
+            if response.status == 200:
+                yield response.status
 
 async def forward_request(url, data, request_id):
     #print(url)
@@ -118,13 +127,17 @@ async def forward_request(url, data, request_id):
         }
         async with session.post(url=url, json=data, headers=headers) as response:
             if response.status == 200:
-                # if True:
-                #     async for chunk_bytes in response.content.iter_chunked(1024):
-                #         yield chunk_bytes
-                # else:
-                content = await response.read()
-                #yield content
-                return content
+                if True:
+                    async for chunk_bytes in response.content.iter_chunked(1024):
+                        yield chunk_bytes
+                else:
+                    content = await response.read()
+                    yield content
+                    #return content
+
+async def consume(url,data,request_id):
+    async for _ in forward_request(url, data, request_id):
+        pass
 
 
 @app.route("/v1/completions", methods=["POST"])
@@ -169,23 +182,24 @@ async def handle_request():
 
         prefill_addr = "http://localhost:50003/v1/completions"
         decode_addr = "http://localhost:50005/v1/completions"
-        print(request.path)
+        #print(request.path)
         # finish prefill
-        #async for _ in forward_request(
-        #    f"http://{prefill_addr}{request.path}", prefill_request, request_id
+        #async for _ in forward_request_prefill(
+        #    prefill_addr, prefill_request, request_id
         #):
         #    continue
-        asyncio.create_task(forward_request(prefill_addr, prefill_request, request_id))
+        #asyncio.create_task(forward_request(prefill_addr, prefill_request, request_id))
+        asyncio.create_task(consume(prefill_addr, prefill_request, request_id))
 
         # return decode
-        #generator = forward_request(
-        #    f"http://{decode_addr}{request.path}", original_request_data, request_id
-        #)
-        generator = asyncio.create_task(forward_request(decode_addr, original_request_data, request_id))
-        gen_response = await generator
-        response=await make_response(gen_response)
-        print(response)
-        #response.timeout = None
+        generator = forward_request(
+            decode_addr, original_request_data, request_id
+        )
+        #generator = asyncio.create_task(forward_request(decode_addr, original_request_data, request_id))
+        #gen_response = await generator
+        response=await make_response(generator)
+        #print(response)
+        response.timeout = None
         
 
         return response

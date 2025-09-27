@@ -135,9 +135,9 @@ class EngineCore:
             log_stats=self.log_stats,
         )
 
-        if self.scheduler.connector is not None and self.scheduler.connector.transfer_config.kv_role=="kv_consumer":
-            block_allocation_thread = threading.Thread(target=self.check_for_allocation, daemon=True)
-            block_allocation_thread.start()
+        #if self.scheduler.connector is not None: # and self.scheduler.connector.transfer_config.kv_role=="kv_consumer":
+        block_allocation_thread = threading.Thread(target=self.check_for_allocation, daemon=True)
+        block_allocation_thread.start()
 
         self.use_spec_decode = vllm_config.speculative_config is not None
 
@@ -268,24 +268,37 @@ class EngineCore:
 
     def check_for_allocation(self):
         logger.info("starting block_allocation thread")
-        while True:
-            while self.scheduler.pending_allocation_req_ids:
-                print(self.scheduler.pending_allocation_req_ids)
-                allocated_req_ids = []
-                pending_allocation_req_ids = self.scheduler.pending_allocation_req_ids.copy()
-                for req_id in pending_allocation_req_ids:
-                    if os.path.exists("req_block_data/"+req_id+".pkl"):
+        if self.scheduler.connector.transfer_config.kv_role == "kv_producer":
+            while True:
+                while self.scheduler.allocated_req_ids:
+                    allocated_req_ids=self.scheduler.allocated_req_ids.copy()
+                    for req_id in allocated_req_ids:
                         try:
-                            with open("req_block_data/"+req_id+".pkl",'rb') as file:
-                                block_ids=pickle.load(file)
-                                self.scheduler.allocated_block_ids[req_id] = block_ids
-                                allocated_req_ids.append(req_id)
+                            with open("req_block_data/"+req_id+".pkl",'wb') as file:
+                                pickle.dump((self.scheduler.kv_cache_manager.get_blocks(req_id)), file)
+                            self.scheduler.allocated_req_ids.remove(req_id)
                         except EOFError:
-                            logger.info("EOFError loading block ids, moving on")
-                for req_id in allocated_req_ids:
-                    self.scheduler.pending_allocation_req_ids.remove(req_id)
-            print(self.scheduler.pending_allocation_req_ids)
-            time.sleep(0.1)
+                            logger.info("EOFError storing block ids, moving on")
+                time.sleep(0.0001)
+        else:
+            while True:
+                while self.scheduler.pending_allocation_req_ids:
+                    #print(self.scheduler.pending_allocation_req_ids)
+                    allocated_req_ids = []
+                    pending_allocation_req_ids = self.scheduler.pending_allocation_req_ids.copy()
+                    for req_id in pending_allocation_req_ids:
+                        if os.path.exists("req_block_data/"+req_id+".pkl"):
+                            try:
+                                with open("req_block_data/"+req_id+".pkl",'rb') as file:
+                                    block_ids=pickle.load(file)
+                                    self.scheduler.allocated_block_ids[req_id] = block_ids
+                                    allocated_req_ids.append(req_id)
+                            except EOFError:
+                                logger.info("EOFError loading block ids, moving on")
+                    for req_id in allocated_req_ids:
+                        self.scheduler.pending_allocation_req_ids.remove(req_id)
+                #print(self.scheduler.pending_allocation_req_ids)
+                time.sleep(0.0001)
 
 
 
@@ -440,7 +453,6 @@ class EngineCore:
         """
         batch_queue = self.batch_queue
         assert batch_queue is not None
-        logger.info("In step_with_batch_queue")
         # Try to schedule a new batch if the batch queue is not full, but
         # the scheduler may return an empty batch if all requests are scheduled.
         # Note that this is not blocking.

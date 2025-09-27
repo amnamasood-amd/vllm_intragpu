@@ -19,6 +19,8 @@ from vllm.v1.kv_cache_interface import KVCacheGroupSpec
 if TYPE_CHECKING:
     from vllm.attention.layer import Attention
 
+import math, ctypes
+hip = ctypes.CDLL("libamdhip64.so")
 
 class MultiModalBudget:
     """Helper class to calculate budget information for multi-modal models."""
@@ -277,3 +279,26 @@ def bind_kv_cache(
     for layer_name, kv_cache in kv_caches.items():
         # NOTE: Use list because of v0 PP virtual engine.
         forward_context[layer_name].kv_cache = [kv_cache]
+
+def int_to_maskarr(mask_int, length):
+    out = []
+    for _ in range(length):
+        out.append(mask_int & 0xFFFFFFFF)
+        mask_int >>= 32
+    return out
+ 
+def stream_with_cu_mask(mask_bits):
+    """Return torch.cuda.ExternalStream limited to the given CU mask."""
+    hip.hipExtStreamCreateWithCUMask.restype  = ctypes.c_int
+    hip.hipExtStreamCreateWithCUMask.argtypes = [
+        ctypes.POINTER(ctypes.c_void_p),
+        ctypes.c_uint,
+        ctypes.POINTER(ctypes.c_uint),
+    ]
+    raw_stream = ctypes.c_void_p()
+    mask_arr   = (ctypes.c_uint * len(mask_bits))(*mask_bits)
+    ret = hip.hipExtStreamCreateWithCUMask(
+        ctypes.byref(raw_stream), len(mask_bits), mask_arr
+    )
+    assert ret == 0, f"HIP err {ret} creating masked stream"
+    return torch.cuda.ExternalStream(raw_stream.value)

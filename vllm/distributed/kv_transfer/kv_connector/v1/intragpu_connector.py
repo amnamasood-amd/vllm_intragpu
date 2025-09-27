@@ -168,6 +168,7 @@ class IntraGPUConnector(KVConnectorBase_V1):
         self.qmgr = queue_manager()
         self.running_prefill=[] #self.qmgr.base_manager.list([])
         self.gpu_manager=None
+        self._connector_metadata = IntraGPUConnectorMetadata()
         #self._rank = get_world_group().local_rank
         #logger.info("kv connector local rank %d", self._rank)
 
@@ -504,6 +505,7 @@ class IntraGPUConnector(KVConnectorBase_V1):
         """
         meta = IntraGPUConnectorMetadata()
         
+        """
         total_need_load = 0
         for new_req in scheduler_output.scheduled_new_reqs:
             if new_req.req_id in self._requests_need_load:
@@ -557,6 +559,7 @@ class IntraGPUConnector(KVConnectorBase_V1):
 
         assert total_need_load == len(self._requests_need_load)
         self._requests_need_load.clear()
+        """
         
         return meta
         
