@@ -98,13 +98,14 @@ class EngineCore:
 
         if vllm_config.kv_transfer_config.kv_role=="kv_producer":
             with open("num_gpu_blocks.pkl",'wb') as file:
-                pickle.dump(num_gpu_blocks, file)
+                pickle.dump([num_gpu_blocks], file)
         else:
             while True:
                 if os.path.exists("num_gpu_blocks.pkl"):
                     try:
                         with open("num_gpu_blocks.pkl",'rb') as file:
                             num_gpu_blocks=pickle.load(file)
+                        num_gpu_blocks=int(num_gpu_blocks[0])
                         #num_gpu_blocks=blocks[0]
                         #num_cpu_blocks=blocks[1]
                         break
