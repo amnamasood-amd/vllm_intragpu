@@ -96,21 +96,22 @@ class EngineCore:
         num_gpu_blocks, num_cpu_blocks, kv_cache_config = \
             self._initialize_kv_caches(vllm_config)
 
-        if vllm_config.kv_transfer_config.kv_role=="kv_producer":
-            with open("num_gpu_blocks.pkl",'wb') as file:
-                pickle.dump([num_gpu_blocks], file)
-        else:
-            while True:
-                if os.path.exists("num_gpu_blocks.pkl"):
-                    try:
-                        with open("num_gpu_blocks.pkl",'rb') as file:
-                            num_gpu_blocks=pickle.load(file)
-                        num_gpu_blocks=int(num_gpu_blocks[0])
-                        #num_gpu_blocks=blocks[0]
-                        #num_cpu_blocks=blocks[1]
-                        break
-                    except EOFError:
-                        logger.info("cannot open num_gpu_blocks.pkl")
+        # if vllm_config.kv_transfer_config.kv_role=="kv_producer":
+        #     with open("num_gpu_blocks.pkl",'wb') as file:
+        #         pickle.dump([num_gpu_blocks], file)
+        # else:
+        #     while True:
+        #         if os.path.exists("num_gpu_blocks.pkl"):
+        #             try:
+        #                 with open("num_gpu_blocks.pkl",'rb') as file:
+        #                     num_gpu_blocks=pickle.load(file)
+        #                 num_gpu_blocks=int(num_gpu_blocks[0])
+        #                 #num_gpu_blocks=blocks[0]
+        #                 #num_cpu_blocks=blocks[1]
+        #                 break
+        #             except EOFError:
+        #                 logger.info("cannot open num_gpu_blocks.pkl")
+        #         time.sleep(0.0001)
 
         vllm_config.cache_config.num_gpu_blocks = num_gpu_blocks
         vllm_config.cache_config.num_cpu_blocks = num_cpu_blocks
@@ -212,11 +213,27 @@ class EngineCore:
                 # much memory can be allocated for kv cache.
                 available_gpu_memory = (
                     self.model_executor.determine_available_memory())
+                if vllm_config.kv_transfer_config.kv_role=="kv_producer":
+                    with open("num_gpu_blocks.pkl",'wb') as file:
+                        pickle.dump(available_gpu_memory, file)
+                else:
+                    while True:
+                        if os.path.exists("num_gpu_blocks.pkl"):
+                            try:
+                                with open("num_gpu_blocks.pkl",'rb') as file:
+                                    available_gpu_memory=pickle.load(file)
+                                break
+                            except EOFError:
+                                logger.info("cannot open num_gpu_blocks.pkl")
+                        time.sleep(0.0001)
                 self.available_gpu_memory_for_kv_cache = \
                     available_gpu_memory[0]
+                logger.info("available_gpu_memory %d", self.available_gpu_memory_for_kv_cache)
         else:
             # Attention free models don't need memory for kv cache
             available_gpu_memory = [0] * len(kv_cache_specs)
+
+        
 
         assert len(kv_cache_specs) == len(available_gpu_memory)
         # Get the kv cache tensor size
