@@ -96,8 +96,25 @@ class EngineCore:
         num_gpu_blocks, num_cpu_blocks, kv_cache_config = \
             self._initialize_kv_caches(vllm_config)
 
+        if vllm_config.kv_transfer_config.kv_role=="kv_producer":
+            with open("num_gpu_blocks.pkl",'wb') as file:
+                pickle.dump(num_gpu_blocks, file)
+        else:
+            while True:
+                if os.path.exists("num_gpu_blocks.pkl"):
+                    try:
+                        with open("num_gpu_blocks.pkl",'rb') as file:
+                            num_gpu_blocks=pickle.load(file)
+                        #num_gpu_blocks=blocks[0]
+                        #num_cpu_blocks=blocks[1]
+                        break
+                    except EOFError:
+                        logger.info("cannot open num_gpu_blocks.pkl")
+
         vllm_config.cache_config.num_gpu_blocks = num_gpu_blocks
         vllm_config.cache_config.num_cpu_blocks = num_cpu_blocks
+        logger.info("num_gpu_blocks %d num_cpu_blocks %d", num_gpu_blocks,num_cpu_blocks)
+
         self.collective_rpc("initialize_cache",
                             args=(num_gpu_blocks, num_cpu_blocks))
 
