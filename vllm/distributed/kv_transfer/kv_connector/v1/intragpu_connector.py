@@ -336,8 +336,8 @@ class IntraGPUConnector(KVConnectorBase_V1):
         # Get the metadata
         metadata: KVConnectorMetadata = self._get_connector_metadata()
         assert isinstance(metadata, IntraGPUConnectorMetadata)
-        logger.info("Printing Connector metadata from scheduler")
-        print(metadata)
+        #logger.info("Printing Connector metadata from scheduler")
+        #print(metadata)
 
         if metadata is None:
             logger.warning(

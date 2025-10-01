@@ -13,6 +13,7 @@ import multiprocessing
 import torch.multiprocessing as mp
 import pickle
 from vllm.distributed.parallel_state import get_world_group
+import os
 
 logger = init_logger(__name__)
 
@@ -71,16 +72,22 @@ class BaseModelLoader(ABC):
                 logger.info("getting parameter list")
                 #self.param_storage_list = connector_q.get()
                 rank = get_world_group().local_rank
-                with open("model_handles_"+str(rank)+".pkl",'rb') as file:
-                    self.param_storage_list = pickle.load(file)
-                logger.info("length of param_storage_list %d", len(self.param_storage_list))
-                weights=[]
-                for spec in self.param_storage_list:
-                    weights.append(mp.reductions.rebuild_cuda_tensor(**spec))
-                i=0
-                for param in model.parameters():
-                    param.data = weights[i]
-                    i+=1
+                while True:
+                    if os.path.exists("model_handles_"+str(rank)+".pkl"):  
+                        try:       
+                            with open("model_handles_"+str(rank)+".pkl",'rb') as file:
+                                self.param_storage_list = pickle.load(file)
+                            logger.info("length of param_storage_list %d", len(self.param_storage_list))
+                            weights=[]
+                            for spec in self.param_storage_list:
+                                weights.append(mp.reductions.rebuild_cuda_tensor(**spec))
+                            i=0
+                            for param in model.parameters():
+                                param.data = weights[i]
+                                i+=1
+                            break
+                        except EOFError:
+                            logger.info("cannot open model_handles file")
                 #self.load_weights(model, model_config)
 
                 

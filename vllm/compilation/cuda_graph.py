@@ -189,5 +189,10 @@ class CUDAGraphWrapper:
                 f"during replay. Expected {entry.input_addresses}, "
                 f"got {new_input_addresses}")
 
-        entry.cudagraph.replay()
+        if forward_context.cuda_stream is not None:
+            #logger.info("got cuda stream")
+            with torch.cuda.stream(forward_context.cuda_stream):
+                entry.cudagraph.replay()
+        else:
+            entry.cudagraph.replay()
         return entry.output

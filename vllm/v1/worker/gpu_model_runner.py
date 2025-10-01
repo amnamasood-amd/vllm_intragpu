@@ -101,6 +101,7 @@ from vllm.model_executor.model_loader.utils import send_tensor_with_untyped_stor
 import torch.multiprocessing as mp
 import pickle
 from vllm.distributed.parallel_state import get_world_group
+import os
 
 
 logger = init_logger(__name__)
@@ -329,17 +330,20 @@ class GPUModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
             pin_memory=self.pin_memory)
 
         
-        self.n_cu=304
-        self.decode_cu=128
+        self.n_cu=320
+        self.decode_cu=192
         self.mask_words=(self.n_cu + 31) // 32
         decode_mask_int=(1 << self.decode_cu) - 1
         if self.kv_transfer_config.kv_role == "kv_producer":
             self.cu_mask_int=decode_mask_int
         else:
             self.cu_mask_int=((1 << self.n_cu) - 1) ^ decode_mask_int
-        #self.cu_mask=int_to_maskarr(self.cu_mask_int, self.mask_words)
-        #self.model_stream=stream_with_cu_mask(self.cu_mask)
-        self.model_stream=None
+        self.cu_mask=int_to_maskarr(self.cu_mask_int, self.mask_words)
+        logger.info("Mask words %d", self.mask_words)
+        logger.info("CU mask")
+        print(self.cu_mask)
+        self.model_stream=stream_with_cu_mask(self.cu_mask)
+        #self.model_stream=None
 
     def _make_buffer(self, *args, dtype: torch.dtype) -> CpuGpuBuffer:
         return CpuGpuBuffer(*args,
@@ -2973,19 +2977,25 @@ class GPUModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
                 #kvcache_list=kv_connector.qmgr.q.get()
                 kvcache_list=None
                 rank = get_world_group().local_rank
-                with open("kvcache_handles_"+str(rank)+".pkl",'rb') as file:
-                    kvcache_list = pickle.load(file)
-                logger.info("kvcache_list length %d", len(kvcache_list))
-                kvcache_tensor_list=[]
-                for spec in kvcache_list:
-                    kvcache_tensor_list.append(mp.reductions.rebuild_cuda_tensor(**spec))
-                i=0
-                for kv_cache_tensor in kv_cache_config.kv_cache_tensors: 
-                    tensor = kvcache_tensor_list[i]
-                    i+=1
-                    for layer_name in kv_cache_tensor.shared_by:
-                        kv_cache_raw_tensors[layer_name] = tensor 
-                print(len(kv_cache_raw_tensors))           
+                while True:
+                    if os.path.exists("kvcache_handles_"+str(rank)+".pkl"):
+                        try:
+                            with open("kvcache_handles_"+str(rank)+".pkl",'rb') as file:
+                                kvcache_list = pickle.load(file)
+                            logger.info("kvcache_list length %d", len(kvcache_list))
+                            kvcache_tensor_list=[]
+                            for spec in kvcache_list:
+                                kvcache_tensor_list.append(mp.reductions.rebuild_cuda_tensor(**spec))
+                            i=0
+                            for kv_cache_tensor in kv_cache_config.kv_cache_tensors: 
+                                tensor = kvcache_tensor_list[i]
+                                i+=1
+                                for layer_name in kv_cache_tensor.shared_by:
+                                    kv_cache_raw_tensors[layer_name] = tensor 
+                            print(len(kv_cache_raw_tensors)) 
+                            break
+                        except EOFError:
+                            logger.info("cannot open kv cache handles")          
         else:
             for kv_cache_tensor in kv_cache_config.kv_cache_tensors:
                 tensor = torch.zeros(kv_cache_tensor.size,

@@ -18,6 +18,13 @@ from vllm.v1.kv_cache_interface import AttentionSpec
 
 _PARTITION_SIZE_ROCM = 256
 
+if current_platform.is_cuda_alike():
+    from vllm import _custom_ops as ops
+elif current_platform.is_xpu():
+    from vllm._ipex_ops import ipex_ops as ops
+from vllm.attention.ops.triton_unified_attention import (
+                    unified_attention)
+
 if current_platform.is_rocm():
     import aiter
 
@@ -478,6 +485,16 @@ class AiterFlashAttentionImpl(AttentionImpl):
                 layer._k_scale,
                 layer._v_scale,
             )
+            # ops.reshape_and_cache_flash(
+            #     key,
+            #     value,
+            #     key_cache,
+            #     value_cache,
+            #     attn_metadata.slot_mapping,
+            #     self.kv_cache_dtype,
+            #     layer._k_scale,
+            #     layer._v_scale,
+            # )
 
         if self.kv_cache_dtype.startswith("fp8"):
             key_cache = key_cache.view(torch.float8_e4m3fnuz)
@@ -544,6 +561,28 @@ class AiterFlashAttentionImpl(AttentionImpl):
                 None,
                 _PARTITION_SIZE_ROCM,
             )
+            # descale_shape = (cu_seqlens_q.shape[0] - 1, key.shape[1])
+
+            # unified_attention(
+            #     q=query[:num_actual_tokens],
+            #     k=key_cache,
+            #     v=value_cache,
+            #     out=output[:num_actual_tokens],
+            #     cu_seqlens_q=cu_seqlens_q,
+            #     max_seqlen_q=max_seqlen_q,
+            #     seqused_k=seqused_k,
+            #     max_seqlen_k=max_seqlen_k,
+            #     softmax_scale=self.scale,
+            #     causal=True,
+            #     alibi_slopes=self.alibi_slopes,
+            #     window_size=self.sliding_window,
+            #     block_table=block_table,
+            #     softcap=self.logits_soft_cap,
+            #     q_descale=None,  # Not supported
+            #     k_descale=layer._k_scale.expand(descale_shape),
+            #     v_descale=layer._v_scale.expand(descale_shape),
+            #     sinks=None,
+            # )
             return output
         else:
             raise NotImplementedError(

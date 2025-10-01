@@ -362,8 +362,8 @@ class Worker(WorkerBase):
             intermediate_tensors = IntermediateTensors(
                 get_pp_group().recv_tensor_dict(
                     all_gather_group=get_tp_group()))
-        logger.info("calling execute model and checking scheduler")
-        print(scheduler_output.kv_connector_metadata)
+        #logger.info("calling execute model and checking scheduler")
+        #print(scheduler_output.kv_connector_metadata)
         output = self.model_runner.execute_model(scheduler_output,
                                                  intermediate_tensors)
         if isinstance(output, ModelRunnerOutput):

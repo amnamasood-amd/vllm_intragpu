@@ -1093,7 +1093,7 @@ def get_kv_cache_config(
     Returns:
         The generated KVCacheConfigs
     """
-    check_enough_kv_cache_memory(vllm_config, kv_cache_spec, available_memory)
+    #check_enough_kv_cache_memory(vllm_config, kv_cache_spec, available_memory)
     if vllm_config.scheduler_config.disable_hybrid_kv_cache_manager:
         unify_hybrid_kv_cache_specs(kv_cache_spec)
 

@@ -330,6 +330,7 @@ class Scheduler(SchedulerInterface):
         # len(self.running).
         assert (len(scheduled_new_reqs) + len(scheduled_resumed_reqs) +
                 len(scheduled_running_reqs) <= len(self.running))
+        logger.info("Prefill scheduled requesets %d", len(scheduled_new_reqs) + len(scheduled_resumed_reqs) + len(scheduled_running_reqs))
 
         # Get the longest common prefix among all requests in the running queue.
         # This can be potentially used for cascade attention.
@@ -748,6 +749,7 @@ class Scheduler(SchedulerInterface):
         # len(self.running).
         assert (len(scheduled_new_reqs) + len(scheduled_resumed_reqs) +
                 len(scheduled_running_reqs) <= len(self.running))
+        logger.info("Decode scheduled requests %d", len(scheduled_new_reqs) + len(scheduled_resumed_reqs) + len(scheduled_running_reqs))
 
         # Get the longest common prefix among all requests in the running queue.
         # This can be potentially used for cascade attention.
