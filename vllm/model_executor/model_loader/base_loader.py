@@ -48,16 +48,26 @@ class BaseModelLoader(ABC):
                       load_config.device
         target_device = torch.device(load_device)
         with set_default_torch_dtype(model_config.dtype):
-            with target_device:
-                model = initialize_model(vllm_config=vllm_config,
-                                         model_config=model_config)
-            #print(get_kv_transfer_group())
-            logger.debug("Loading weights on %s ...", load_device)
+            # with target_device:
+            #     model = initialize_model(vllm_config=vllm_config,
+            #                              model_config=model_config)
+            # #print(get_kv_transfer_group())
+            # logger.debug("Loading weights on %s ...", load_device)
             # Quantization does not happen in `load_weights` but after it
             if connector_role == None:
+                with target_device:
+                    model = initialize_model(vllm_config=vllm_config,
+                                             model_config=model_config)
+                #print(get_kv_transfer_group())
+                logger.debug("Loading weights on %s ...", load_device)
                 self.load_weights(model, model_config)
             elif connector_role == "kv_producer":
                 #kv producer/prefill instance is going to load weights and populate param_storage_list
+                with target_device:
+                    model = initialize_model(vllm_config=vllm_config,
+                                             model_config=model_config)
+                #print(get_kv_transfer_group())
+                logger.debug("Loading weights on %s ...", load_device)
                 self.load_weights(model, model_config)
                 assert connector_q is not None
                 for param in model.parameters():
@@ -69,7 +79,7 @@ class BaseModelLoader(ABC):
                 #print(len(self.param_storage_list))
             else:
                 assert connector_q is not None
-                logger.info("getting parameter list")
+                #logger.info("getting parameter list")
                 #self.param_storage_list = connector_q.get()
                 rank = get_world_group().local_rank
                 while True:
@@ -81,15 +91,23 @@ class BaseModelLoader(ABC):
                             weights=[]
                             for spec in self.param_storage_list:
                                 weights.append(mp.reductions.rebuild_cuda_tensor(**spec))
-                            i=0
-                            for param in model.parameters():
-                                param.data = weights[i]
-                                i+=1
+                            # i=0
+                            # for param in model.parameters():
+                            #     param.data = weights[i]
+                            #     i+=1
                             break
                         except EOFError:
                             logger.info("cannot open model_handles file")
                 #self.load_weights(model, model_config)
-
+                with target_device:
+                    model = initialize_model(vllm_config=vllm_config,
+                                             model_config=model_config)
+                #print(get_kv_transfer_group())
+                logger.debug("Loading weights on %s ...", load_device)
+                i=0
+                for param in model.parameters():
+                    param.data = weights[i]
+                    i+=1
                 
             process_weights_after_loading(model, model_config, target_device)
         return model.eval()
