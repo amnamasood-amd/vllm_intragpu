@@ -180,8 +180,8 @@ async def handle_request():
         # )
         request_id = (f"{count}")
 
-        prefill_addr = "http://localhost:50003/v1/completions"
-        decode_addr = "http://localhost:50005/v1/completions"
+        prefill_addr = "http://localhost:60003/v1/completions"
+        decode_addr = "http://localhost:60005/v1/completions"
         #print(request.path)
         # finish prefill
         #async for _ in forward_request_prefill(
@@ -215,6 +215,6 @@ async def handle_request():
 
 
 if __name__ == "__main__":
-    t = start_service_discovery("0.0.0.0", 50001)
+    t = start_service_discovery("0.0.0.0", 60001)
     app.run(host="0.0.0.0", port=10002)
     t.join()

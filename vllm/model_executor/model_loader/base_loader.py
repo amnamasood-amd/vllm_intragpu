@@ -14,6 +14,7 @@ import torch.multiprocessing as mp
 import pickle
 from vllm.distributed.parallel_state import get_world_group
 import os
+import time
 
 logger = init_logger(__name__)
 
@@ -84,7 +85,8 @@ class BaseModelLoader(ABC):
                 rank = get_world_group().local_rank
                 while True:
                     if os.path.exists("model_handles_"+str(rank)+".pkl"):  
-                        try:       
+                        try:
+                            time.sleep(1)       
                             with open("model_handles_"+str(rank)+".pkl",'rb') as file:
                                 self.param_storage_list = pickle.load(file)
                             logger.info("length of param_storage_list %d", len(self.param_storage_list))

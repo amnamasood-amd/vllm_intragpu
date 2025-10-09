@@ -302,3 +302,78 @@ def stream_with_cu_mask(mask_bits):
     )
     assert ret == 0, f"HIP err {ret} creating masked stream"
     return torch.cuda.ExternalStream(raw_stream.value)
+
+def destroy_external_stream(es: torch.cuda.ExternalStream):
+    h = ctypes.c_void_p(int(es.cuda_stream))
+    ret = hip.hipStreamSynchronize(h)
+    if ret != 0:
+        raise RuntimeError(f"HIP err {ret} synchronizing stream before destroy")
+    ret = hip.hipStreamDestroy(h)
+    if ret != 0:
+        raise RuntimeError(f"HIP err {ret} destroying stream")
+
+def regular_stream():
+    """Return torch.cuda.ExternalStream limited to the given CU mask."""
+    hip.hipStreamCreate.restype  = ctypes.c_int
+    hip.hipStreamCreate.argtypes = [
+        ctypes.POINTER(ctypes.c_void_p),
+    ]
+    raw_stream = ctypes.c_void_p()
+    ret = hip.hipStreamCreate(
+        ctypes.byref(raw_stream)
+    )
+    assert ret == 0, f"HIP err {ret} creating masked stream"
+    return torch.cuda.ExternalStream(raw_stream.value)
+
+def regular_stream_nonblocking():
+    """Return torch.cuda.ExternalStream limited to the given CU mask."""
+    hip.hipStreamCreateWithFlags.restype  = ctypes.c_int
+    hip.hipStreamCreateWithFlags.argtypes = [
+        ctypes.POINTER(ctypes.c_void_p),
+        ctypes.c_uint,
+    ]
+    raw_stream = ctypes.c_void_p()
+    ret = hip.hipStreamCreateWithFlags(
+        ctypes.byref(raw_stream), 1
+    )
+    assert ret == 0, f"HIP err {ret} creating masked stream"
+    return torch.cuda.ExternalStream(raw_stream.value)
+
+def check_stream_flags(s):
+    stream_handle=s._as_parameter_
+    flags = ctypes.c_uint()
+    priority = ctypes.c_int()
+    hip.hipStreamGetFlags(stream_handle, ctypes.byref(flags))
+    hip.hipStreamGetPriority(stream_handle, ctypes.byref(priority)) 
+    print("stream flags", flags.value, priority.value, s.device, s.cuda_stream)
+
+def priority_stream_nonblocking():
+    """Return torch.cuda.ExternalStream limited to the given CU mask."""
+    hip.hipStreamCreateWithPriority.restype  = ctypes.c_int
+    hip.hipStreamCreateWithPriority.argtypes = [
+        ctypes.POINTER(ctypes.c_void_p),
+        ctypes.c_uint,
+        ctypes.c_int,
+    ]
+    raw_stream = ctypes.c_void_p()
+    ret = hip.hipStreamCreateWithPriority(
+        ctypes.byref(raw_stream), 1, -1
+    )
+    assert ret == 0, f"HIP err {ret} creating masked stream"
+    return torch.cuda.ExternalStream(raw_stream.value)
+
+# def get_cu_mask(stream, mask_bits):
+#     """Return torch.cuda.ExternalStream limited to the given CU mask."""
+#     hip.hipExtStreamGetCUMask.restype  = ctypes.c_int
+#     hip.hipExtStreamGetCUMask.argtypes = [
+#         ctypes.POINTER(ctypes.c_void_p),
+#         ctypes.c_uint,
+#         ctypes.POINTER(ctypes.c_uint),
+#     ]
+#     raw_stream = ctypes.c_void_p()
+#     mask_arr   = (ctypes.c_uint * len(mask_bits))(*mask_bits)
+#     ret = hip.hipExtStreamCreateWithCUMask(
+#         ctypes.byref(raw_stream), len(mask_bits), mask_arr
+#     )
+#     assert ret == 0, f"HIP err {ret} creating masked stream"
+#     return torch.cuda.ExternalStream(raw_stream.value)

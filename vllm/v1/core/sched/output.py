@@ -171,6 +171,7 @@ class SchedulerOutput:
     # the bitmask for the whole batch
     grammar_bitmask: Optional[npt.NDArray[np.int32]]
 
+    cu_mask_int: Optional[int]
     # KV Cache Connector metadata.
     kv_connector_metadata: Optional[KVConnectorMetadata] = None
 
@@ -193,6 +194,7 @@ class SchedulerOutput:
             structured_output_request_ids={},
             grammar_bitmask=None,
             kv_connector_metadata=None,
+            cu_mask_int=None,
         )
 
 

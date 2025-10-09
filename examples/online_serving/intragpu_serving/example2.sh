@@ -23,13 +23,13 @@
 # Configuration - can be overridden via environment variables
 MODEL=${MODEL:-meta-llama/Llama-3.1-70B-Instruct}
 TIMEOUT_SECONDS=${TIMEOUT_SECONDS:-1200}
-PROXY_PORT=${PROXY_PORT:-50001}
+PROXY_PORT=${PROXY_PORT:-60001}
 
 # Default 1P3D configuration (1 Prefill + 3 Decode)
 PREFILL_GPUS=${PREFILL_GPUS:-2}
 DECODE_GPUS=${DECODE_GPUS:-2}
-PREFILL_PORTS=${PREFILL_PORTS:-50003}
-DECODE_PORTS=${DECODE_PORTS:-50005}
+PREFILL_PORTS=${PREFILL_PORTS:-60003}
+DECODE_PORTS=${DECODE_PORTS:-60005}
 
 echo "Warning: P2P NCCL disaggregated prefill XpYd support for vLLM v1 is experimental and subject to change."
 echo ""
@@ -123,7 +123,7 @@ wait_for_server() {
 }
 
 main() {
-    check_required_files
+    #check_required_files
     check_hf_token
     #check_num_gpus
     ensure_python_library_installed pandas
@@ -182,6 +182,7 @@ main() {
         --kv-transfer-config \
         "{\"kv_connector\":\"IntraGPUConnector\",\"kv_role\":\"kv_producer\",\"kv_buffer_size\":\"8e9\",\"kv_port\":\"$kv_port\"}" > decode.log &
         PIDS+=($!)
+        #--max-num-seqs 256 \
         #--compilation-config '{"cudagraph_mode":"FULL"}' \
     done
 
@@ -224,6 +225,7 @@ main() {
         --kv-transfer-config \
         "{\"kv_connector\":\"IntraGPUConnector\",\"kv_role\":\"kv_consumer\",\"kv_buffer_size\":\"1e1\",\"kv_port\":\"$kv_port\"}" > prefill.log &
         PIDS+=($!)
+        #--max-num-seqs 256 \
         #--compilation-config '{"cudagraph_mode":"FULL"}' \
     done
     

@@ -365,6 +365,7 @@ class Scheduler(SchedulerInterface):
             structured_output_request_ids, grammar_bitmask = (
                 self.get_grammar_bitmask(self.running,
                                         scheduled_spec_decode_tokens))
+            cu_mask_int=None
             scheduler_output = SchedulerOutput(
                 scheduled_new_reqs=new_reqs_data,
                 scheduled_cached_reqs=cached_reqs_data,
@@ -382,6 +383,7 @@ class Scheduler(SchedulerInterface):
                 get_freed_mm_hashes(),
                 structured_output_request_ids=structured_output_request_ids,
                 grammar_bitmask=grammar_bitmask,
+                cu_mask_int=cu_mask_int,
             )
             #print(scheduler_output)
         else:
@@ -751,6 +753,8 @@ class Scheduler(SchedulerInterface):
                 len(scheduled_running_reqs) <= len(self.running))
         logger.info("Decode scheduled requests %d", len(scheduled_new_reqs) + len(scheduled_resumed_reqs) + len(scheduled_running_reqs))
 
+        cu_mask_int=(total_num_scheduled_tokens+31)//32
+        logger.info("cu_mask_int %d", cu_mask_int)
         # Get the longest common prefix among all requests in the running queue.
         # This can be potentially used for cascade attention.
         num_common_prefix_blocks = [0] * len(
@@ -841,6 +845,7 @@ class Scheduler(SchedulerInterface):
                 get_freed_mm_hashes(),
                 structured_output_request_ids=structured_output_request_ids,
                 grammar_bitmask=grammar_bitmask,
+                cu_mask_int=cu_mask_int,
             )
             #print(scheduler_output)
         else:
