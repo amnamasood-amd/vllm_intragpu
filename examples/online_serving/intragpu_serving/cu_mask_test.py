@@ -87,22 +87,27 @@ def check_stream_flags(s):
 #torch.cuda.empty_cache()
 torch.cuda.set_device(0) 
 streams=[]
-for i in range(16):
-    streams.append(torch.cuda.Stream())
-    print(streams[i].cuda_stream)
+
+#for i in range(16):
+#    streams.append(torch.cuda.Stream())
+    #print(streams[i].cuda_stream)
 #streams.append(torch.cuda.Stream())
+for i in range(32):
+    streams.append(regular_stream_nonblocking())
+for i in range(32):
+    streams.append(priority_stream_nonblocking())
 #check_stream_flags(streams[0])
 #check_stream_flags(priority_stream_nonblocking())
 #print(streams[0].priority)
 #streams.append(regular_stream())
-# for i in range(1,10):
-#     cu_mask_int=(1<<32*i)-1
-#     #print(cu_mask_int)
-#     cu_mask=int_to_maskarr(cu_mask_int,9)
-#     #print(cu_mask)
-#     streams.append(stream_with_cu_mask(cu_mask))
-#     check_stream_flags(streams[i])
-#     #streams.append(torch.cuda.Stream())
+for i in range(1,20):
+    cu_mask_int=(1<<32*i)-1
+    #print(cu_mask_int)
+    cu_mask=int_to_maskarr(cu_mask_int,10)
+    #print(cu_mask)
+    streams.append(stream_with_cu_mask(cu_mask))
+    #check_stream_flags(streams[i])
+    #streams.append(torch.cuda.Stream())
 
 # x=torch.rand(1024,1024).to("cuda:0")
 # y=torch.rand(1024,1024).to("cuda:0")

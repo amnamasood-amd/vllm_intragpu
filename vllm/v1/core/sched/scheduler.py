@@ -176,6 +176,11 @@ class Scheduler(SchedulerInterface):
         self.allocated_block_ids: dict[str,KVCacheBlocks] = {}
         self.allocated_req_ids: list[str] = []
 
+        if self.vllm_config.kv_transfer_config.kv_role=="kv_producer":
+            self.prev_prefill_counter=0
+        else:
+            self.prev_prefill_counter=-1
+
     def prefill_schedule(self) -> SchedulerOutput:   
         #logger.info("Prefill Scheduling")
         scheduled_new_reqs: list[Request] = []
@@ -242,14 +247,20 @@ class Scheduler(SchedulerInterface):
             while self.waiting and token_budget > 0:
                 if len(self.running) == self.max_num_running_reqs:
                     break
-
+                
                 request = self.waiting.peek_request()
+                
 
                 num_external_computed_tokens = 0
                 load_kv_async = False
 
                 #check if decode has already allocated blocks
                 if request.request_id in self.pending_allocation_req_ids:
+                    #logger.info("skipping scheduling for request %s", request.request_id)
+                    #print(self.waiting)
+                    #print(self.pending_allocation_req_ids)
+                    skipped_waiting_requests.prepend_request(request)
+                    self.waiting.pop_request()
                     continue
 
                 if request.num_computed_tokens != 0:
@@ -260,7 +271,7 @@ class Scheduler(SchedulerInterface):
                 new_encoder_compute_budget = encoder_compute_budget
 
                 num_new_tokens = request.num_tokens - request.num_computed_tokens
-                logger.info("new request %s num_new_tokens %d", request.request_id, num_new_tokens)
+                logger.info("new request %s num_new_tokens %d available token budget %d", request.request_id, num_new_tokens, token_budget)
                 if (0 < self.scheduler_config.long_prefill_token_threshold
                         < num_new_tokens):
                     num_new_tokens = (
@@ -314,10 +325,11 @@ class Scheduler(SchedulerInterface):
                 # Count the number of prefix cached tokens.
                 if request.num_cached_tokens < 0:
                     request.num_cached_tokens = request.num_computed_tokens
+                logger.info("request scheduled")
 
         # Put back any skipped requests at the head of the waiting queue
         if skipped_waiting_requests:
-            logger.info("there should be no skipped requests")
+            logger.info("skipped requests")
             self.waiting.prepend_requests(skipped_waiting_requests)
 
         # Check if the scheduling constraints are satisfied.
@@ -337,8 +349,8 @@ class Scheduler(SchedulerInterface):
         num_common_prefix_blocks = [0] * len(
             self.kv_cache_config.kv_cache_groups)
     
-        #logger.info("Printing num_scheduled_tokens")
-        #print(num_scheduled_tokens)
+        logger.info("Printing num_scheduled_tokens")
+        print(num_scheduled_tokens)
         #logger.info("Printing scheduled_running_reqs")
         #print([req.request_id for req in scheduled_running_reqs])
         #logger.info("Printing scheduled_new_reqs")
@@ -366,6 +378,22 @@ class Scheduler(SchedulerInterface):
                 self.get_grammar_bitmask(self.running,
                                         scheduled_spec_decode_tokens))
             cu_mask_int=None
+            # while True:
+            #     if os.path.exists("cu_mask_int.pkl"):
+            #         try:
+            #             with open("cu_mask_int.pkl","rb") as file:
+            #                 temp = pickle.load(file)
+            #             cu_mask_int = temp[0]
+            #             current_prefill_counter=temp[1]
+            #             if current_prefill_counter != self.prev_prefill_counter:
+            #                 logger.info("got cu_mask_int %d current_prefill_counter %d", cu_mask_int, current_prefill_counter)
+            #                 self.prev_prefill_counter=current_prefill_counter
+            #                 break
+            #             #break
+            #         except EOFError:
+            #             logger.info("cannot open cu_mask file")
+            #     time.sleep(0.0001)
+
             scheduler_output = SchedulerOutput(
                 scheduled_new_reqs=new_reqs_data,
                 scheduled_cached_reqs=cached_reqs_data,
@@ -448,13 +476,16 @@ class Scheduler(SchedulerInterface):
         #logger.info("finished req ids from prefill")
         #print(just_finished)
         just_finished = list(set(just_finished)-set(self.finished_req_ids_prefill))
-        #logger.info("just finished_req_ids_prefill")
-        #print(just_finished) #add to new running scheduled requests
+        if just_finished:
+            self.prev_prefill_counter+=1
+        logger.info("just finished_req_ids_prefill")
+        print(just_finished) #add to new running scheduled requests
         #print("token_budget ", token_budget)
 
         # For logging.
         scheduled_timestamp = time.monotonic()
-
+        logger.info("already running requests")
+        print([req.request_id for req in self.running])
         # First, schedule the RUNNING requests.
         req_index = 0
         while req_index < len(self.running) and token_budget > 0: 
@@ -513,6 +544,7 @@ class Scheduler(SchedulerInterface):
                     new_blocks=None
                     can_schedule=False
                     scheduled_running_reqs_prefill.append(request)
+                    assert request in self.running_prefill
                     break
                 else: #decode request
                     #print("Allocating blocks for request ", request.request_id)
@@ -554,7 +586,8 @@ class Scheduler(SchedulerInterface):
                     can_schedule = True
                     break
             if not can_schedule:
-                break
+                req_index+=1
+                continue
             #assert new_blocks is not None
 
             # Schedule the request.
@@ -642,11 +675,11 @@ class Scheduler(SchedulerInterface):
 
                     # chunked prefill has to be enabled explicitly to allow
                     # pooling requests to be chunked
-                    if not self.scheduler_config.chunked_prefill_enabled and \
-                        num_new_tokens > token_budget:
-                        self.waiting.pop_request()
-                        skipped_waiting_requests.prepend_request(request)
-                        continue
+                    # if not self.scheduler_config.chunked_prefill_enabled and \
+                    #     num_new_tokens > token_budget:
+                    #     self.waiting.pop_request()
+                    #     skipped_waiting_requests.prepend_request(request)
+                    #     continue
 
                     num_new_tokens = min(num_new_tokens, token_budget)
                     assert num_new_tokens > 0
@@ -752,24 +785,37 @@ class Scheduler(SchedulerInterface):
         assert (len(scheduled_new_reqs) + len(scheduled_resumed_reqs) +
                 len(scheduled_running_reqs) <= len(self.running))
         logger.info("Decode scheduled requests %d", len(scheduled_new_reqs) + len(scheduled_resumed_reqs) + len(scheduled_running_reqs))
+        logger.info("running prefill requests")
+        print([req.request_id for req in self.running_prefill])
+        #prefill_running = (len(scheduled_running_reqs_prefill)+len(scheduled_new_reqs_prefill))>0
+        prefill_running = len(self.running_prefill)>0
+        if prefill_running:
+            #cu_mask_int=32*((8*total_num_scheduled_tokens+31)//32) #TODO: potentially cap at 256
 
-        cu_mask_int=(total_num_scheduled_tokens+31)//32
-        logger.info("cu_mask_int %d", cu_mask_int)
+            cu_mask_int=(total_num_scheduled_tokens+31)//32 #min(9,((total_num_scheduled_tokens+31)//32)) #for no capping, max should be 9
+            logger.info("cu_mask_int %d prefill_counter %d", cu_mask_int, self.prev_prefill_counter)
+            with open("cu_mask_int.pkl","wb") as file:
+                pickle.dump([cu_mask_int, self.prev_prefill_counter],file)
+        else:
+            cu_mask_int=None
+        
+        #cu_mask_int=(total_num_scheduled_tokens+31)//32
+        #logger.info("cu_mask_int %d", cu_mask_int)
         # Get the longest common prefix among all requests in the running queue.
         # This can be potentially used for cascade attention.
         num_common_prefix_blocks = [0] * len(
             self.kv_cache_config.kv_cache_groups)
     
         #for prefill
-        # logger.info("Printing num_scheduled_tokens_prefill")
-        # print(num_scheduled_tokens_prefill)
-        # logger.info("Printing scheduled_running_reqs_prefill")
-        # print([req.request_id for req in scheduled_running_reqs_prefill])
-        # logger.info("Printing scheduled_new_reqs_prefill")
-        # print([req.request_id for req in scheduled_new_reqs_prefill])
-        # logger.info("Printing num_scheduled_tokens")
-        # print(num_scheduled_tokens)
-        # logger.info("Printing scheduled_running_reqs")
+        logger.info("Printing num_scheduled_tokens_prefill")
+        print(num_scheduled_tokens_prefill)
+        logger.info("Printing scheduled_running_reqs_prefill")
+        print([req.request_id for req in scheduled_running_reqs_prefill])
+        logger.info("Printing scheduled_new_reqs_prefill")
+        print([req.request_id for req in scheduled_new_reqs_prefill])
+        logger.info("Printing num_scheduled_tokens")
+        print(num_scheduled_tokens)
+        #logger.info("Printing scheduled_running_reqs")
         # print([req.request_id for req in scheduled_running_reqs])
         # logger.info("Printing scheduled_new_reqs")
         # print([req.request_id for req in scheduled_new_reqs])
@@ -1167,6 +1213,8 @@ class Scheduler(SchedulerInterface):
 
         #update the connector running prefill list
         if self.finished_req_ids_prefill:
+            logger.info("finished_req_ids_prefill")
+            print(self.finished_req_ids_prefill)
             with open("just_finished_prefill.pkl",'wb') as file:
                 pickle.dump(self.finished_req_ids_prefill,file)
             #self.connector.gpu_manager.set_list(self.finished_req_ids)
@@ -1336,6 +1384,8 @@ class Scheduler(SchedulerInterface):
                 else:
                     engine_core_outputs[client_index] = EngineCoreOutputs(
                         finished_requests=finished_set)
+            logger.info("finished_req_ids")
+            print(finished_req-ids)
             finished_req_ids.clear()
 
         if (stats := self.make_stats(spec_decoding_stats)) is not None:
@@ -1493,9 +1543,11 @@ class Scheduler(SchedulerInterface):
         del self.requests[request.request_id]
 
     def get_num_unfinished_requests(self) -> int:
+        logger.info("waiting requests %d running requests %d", len(self.waiting), len(self.running))
         return len(self.waiting) + len(self.running)
 
     def has_finished_requests(self) -> bool:
+        logger.info("finished_req %d", len(self.finished_req_ids))
         return len(self.finished_req_ids) > 0
 
     def reset_prefix_cache(self) -> bool:

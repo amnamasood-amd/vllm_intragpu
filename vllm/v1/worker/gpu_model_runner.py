@@ -330,7 +330,7 @@ class GPUModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
             pin_memory=self.pin_memory)
 
         
-        self.n_cu=320
+        self.n_cu=304
         # self.decode_cu=192
         # self.mask_words=(self.n_cu + 31) // 32
         # decode_mask_int=(1 << self.decode_cu) - 1
@@ -351,7 +351,8 @@ class GPUModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
         self.streams: list[torch.cuda.Stream] = []
         if self.kv_transfer_config.kv_role == "kv_producer":
             #logger.info("assigning streams")
-            self.streams.append(torch.cuda.Stream())
+            #self.streams.append(torch.cuda.Stream())
+            #self.streams.append(regular_stream())
             #self.streams.append(torch.cuda.Stream())
             #check_stream_flags(self.streams[0])
             #self.streams.append(priority_stream_nonblocking())
@@ -359,14 +360,15 @@ class GPUModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
             #for i in range(9):
             #    self.streams.append(priority_stream_nonblocking())
             #check_stream_flags(self.streams[1])
-            #self.streams.append(regular_stream())
-            #cu_mask_int=(1<<160)-1
-            #cu_mask=int_to_maskarr(cu_mask_int, self.mask_words)
-            #self.streams.append(stream_with_cu_mask(cu_mask))
+            #self.streams.append(regular_stream_nonblocking())
+            self.streams.append(regular_stream_nonblocking())
+            # cu_mask_int=(1<<128)-1
+            # cu_mask=int_to_maskarr(cu_mask_int, self.mask_words)
+            # self.streams.append(stream_with_cu_mask(cu_mask))
             # cu_mask_int=(1<<256)-1
             # cu_mask=int_to_maskarr(cu_mask_int, self.mask_words)
             # self.streams.append(stream_with_cu_mask(cu_mask))
-            for i in range(1,4):
+            for i in range(1,6):
                 cu_mask_int=(1<<32*i)-1
                 cu_mask=int_to_maskarr(cu_mask_int, self.mask_words)
                 self.streams.append(stream_with_cu_mask(cu_mask)) #TODO complementary mask for prefill
@@ -376,14 +378,20 @@ class GPUModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
             #logger.info("assigning complementary streams")            
             #self.streams.append(torch.cuda.Stream()) #giving a higher number for lower priority
             #check_stream_flags(self.streams[0])
-            self.streams.append(torch.cuda.Stream())
             #self.streams.append(torch.cuda.Stream())
-            #self.streams.append(priority_stream_nonblocking())
+            
+            #self.streams.append(torch.cuda.Stream())
+            #self.streams.append(regular_stream())
+            self.streams.append(regular_stream_nonblocking())
             #for i in range(9):
             #   self.streams.append(priority_stream_nonblocking())
             #self.streams.append(priority_stream_nonblocking())
             #check_stream_flags(self.streams[1])
-            for i in range(1,4):
+            # decode_mask_int=(1<<128)-1
+            # cu_mask_int=((1 << self.n_cu) - 1) ^ decode_mask_int
+            # cu_mask=int_to_maskarr(cu_mask_int, self.mask_words)
+            # self.streams.append(stream_with_cu_mask(cu_mask))
+            for i in range(1,6):
                 decode_mask_int=(1<<32*i)-1
                 cu_mask_int=((1 << self.n_cu) - 1) ^ decode_mask_int
                 #cu_mask_int=(1<<32*i)-1
@@ -1647,13 +1655,16 @@ class GPUModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
         #     current_stream=self.model_stream
 
         if scheduler_output.cu_mask_int is not None:
-            #cu_mask_int=min(2,scheduler_output.cu_mask_int)
-            #current_stream=self.streams[cu_mask_int]
-            current_stream=self.streams[0]
+            cu_mask_int=min(5,scheduler_output.cu_mask_int)
+            current_stream=self.streams[5]
+            #logger.info("cu_mask_int %d", cu_mask_int)
+            #current_stream=self.streams[0]
         else:
-            current_stream=self.streams[0]
+            #logger.info("cu_mask_int is none")
+            current_stream=self.streams[5]
         
         #current_stream=self.model_stream
+
         #current_stream=torch.cuda.Stream()
         # Run the model.
         # Use persistent buffers for CUDA graphs.
@@ -1665,8 +1676,7 @@ class GPUModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
                 cudagraph_runtime_mode=cudagraph_runtime_mode,
                 batch_descriptor=batch_descriptor,
                 cuda_stream=current_stream,
-        ), self.maybe_get_kv_connector_output(
-                scheduler_output) as kv_connector_output:
+        ), self.maybe_get_kv_connector_output(scheduler_output) as kv_connector_output:
 
             with torch.cuda.stream(current_stream):
                 model_output = self.model(

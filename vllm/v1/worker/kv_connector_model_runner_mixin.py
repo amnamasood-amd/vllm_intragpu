@@ -90,28 +90,29 @@ class KVConnectorModelRunnerMixin:
         wait_for_save: bool = True
     ) -> Generator[KVConnectorOutput, None, None]:
         output = KVConnectorOutput()
-        logger.info("in _get_kv_connector_output")
+        #logger.info("in _get_kv_connector_output")
         #print(wait_for_save)
         # Update KVConnector with the KVConnector metadata forward().
-        kv_connector = get_kv_transfer_group()
-        assert isinstance(kv_connector, KVConnectorBase)
-        #assert scheduler_output.kv_connector_metadata is not None
-        kv_connector.bind_connector_metadata(
-            scheduler_output.kv_connector_metadata)
+        # kv_connector = get_kv_transfer_group()
+        # assert isinstance(kv_connector, KVConnectorBase)
+        # #assert scheduler_output.kv_connector_metadata is not None
+        # kv_connector.bind_connector_metadata(
+        #     scheduler_output.kv_connector_metadata)
 
         # Background KV cache transfers happen here.
         # These transfers are designed to be async and the requests
         # involved may be disjoint from the running requests.
         # Do this here to save a collective_rpc.
-        kv_connector.start_load_kv(get_forward_context())
-        try:
-            yield output
-        finally:
-            if wait_for_save:
-                kv_connector.wait_for_save()
+        #kv_connector.start_load_kv(get_forward_context())
+        yield output
+        #try:
+        #    yield output
+        # finally:
+        #     if wait_for_save:
+        #         kv_connector.wait_for_save()
 
-            output.finished_sending, output.finished_recving = (
-                kv_connector.get_finished(scheduler_output.finished_req_ids))
+        #     output.finished_sending, output.finished_recving = (
+        #         kv_connector.get_finished(scheduler_output.finished_req_ids))
 
-            kv_connector.clear_connector_metadata()
-            logger.info("finished _get_kv_connector_output")
+        #     kv_connector.clear_connector_metadata()
+            #logger.info("finished _get_kv_connector_output")

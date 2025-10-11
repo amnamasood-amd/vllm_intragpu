@@ -401,9 +401,11 @@ class EngineCore:
                 #sched_out_prefill = SchedulerOutputPrefill.from_scheduler_output(scheduler_output)
                 #self.scheduler.connector.qmgr.q.put(sched_out_prefill)
                 #print(scheduler_output.kv_connector_metadata)
+                logger.info("starting model")
                 model_output = self.execute_model_with_error_logging(
                     self.model_executor.execute_model,  # type: ignore
                     scheduler_output)
+                logger.info("finished model, getting outputs")
                 engine_core_outputs = self.scheduler.update_from_output(
                     scheduler_output, model_output)  # type: ignore
                 print(engine_core_outputs)
@@ -413,9 +415,11 @@ class EngineCore:
             #return {}, True
             scheduler_output = self.scheduler.prefill_schedule()
             if scheduler_output:    
+                logger.info("starting model")
                 model_output = self.execute_model_with_error_logging(
                     self.model_executor.execute_model,  # type: ignore
                     scheduler_output)
+                logger.info("finished model, getting outputs")
                 engine_core_outputs = self.scheduler.prefill_update_from_output(
                     scheduler_output, model_output)  # type: ignore
                 print(engine_core_outputs)
