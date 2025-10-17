@@ -17,12 +17,12 @@
 #   PREFILL_PORTS: Comma-separated ports for prefill servers
 #   DECODE_PORTS: Comma-separated port
 # =============================================================================
+
 export HF_TOKEN="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"
 #export MISCOPE_ROOT="/workspace/miscope"
 #export HSA_TOOLS_LIB="/opt/rocm/lib/librocprofiler64.so.1"
 #export LD_LIBRARY_PATH=/opt/rocm/lib/:$LD_LIBRARY_PATH
 # export LD_LIBRARY_PATH=/workspace/clr/build/hipamd/lib:/opt/rocm/lib:$LD_LIBRARY_PATH # 6.4
-
 
 
 # Configuration - can be overridden via environment variables
