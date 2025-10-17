@@ -19,7 +19,6 @@
 #   PROXY_PORT: Proxy server port used to setup XpYd connection.
 #   TIMEOUT_SECONDS: Server startup timeout
 # =============================================================================
-export HF_TOKEN="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"
 
 export MISCOPE_ROOT=/workspace/miscope
 export HSA_TOOLS_LIB=/opt/rocm/lib/librocprofiler64.so.1
