@@ -330,8 +330,8 @@ class GPUModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
             pin_memory=self.pin_memory)
 
         
-        self.n_cu=320
-        # self.decode_cu=192
+        self.n_cu=304
+        self.decode_cu=128
         # self.mask_words=(self.n_cu + 31) // 32
         # decode_mask_int=(1 << self.decode_cu) - 1
         # if self.kv_transfer_config.kv_role == "kv_producer":
@@ -351,7 +351,7 @@ class GPUModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
         self.streams: list[torch.cuda.Stream] = []
         if self.kv_transfer_config.kv_role == "kv_producer":
             #logger.info("assigning streams")
-            self.streams.append(torch.cuda.Stream())
+            # self.streams.append(torch.cuda.Stream())
             #self.streams.append(torch.cuda.Stream())
             #check_stream_flags(self.streams[0])
             #self.streams.append(priority_stream_nonblocking())
@@ -360,35 +360,40 @@ class GPUModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
             #    self.streams.append(priority_stream_nonblocking())
             #check_stream_flags(self.streams[1])
             #self.streams.append(regular_stream())
-            #cu_mask_int=(1<<160)-1
-            #cu_mask=int_to_maskarr(cu_mask_int, self.mask_words)
-            #self.streams.append(stream_with_cu_mask(cu_mask))
+            decode_mask_int=(1 << self.decode_cu) - 1
+            self.cu_mask_int=decode_mask_int
+            self.cu_mask=int_to_maskarr(self.cu_mask_int, self.mask_words)
+            self.streams.append(stream_with_cu_mask(self.cu_mask))
+        else:
+            decode_mask_int=(1 << self.decode_cu) - 1
+            self.cu_mask_int=((1 << self.n_cu) - 1) ^ decode_mask_int
+            self.cu_mask=int_to_maskarr(self.cu_mask_int, self.mask_words)
+            self.streams.append(stream_with_cu_mask(self.cu_mask))
             # cu_mask_int=(1<<256)-1
             # cu_mask=int_to_maskarr(cu_mask_int, self.mask_words)
             # self.streams.append(stream_with_cu_mask(cu_mask))
-            for i in range(1,4):
-                cu_mask_int=(1<<32*i)-1
-                cu_mask=int_to_maskarr(cu_mask_int, self.mask_words)
-                self.streams.append(stream_with_cu_mask(cu_mask)) #TODO complementary mask for prefill
+            # for i in range(1,4):
+            #     cu_mask_int=(1<<32*i)-1
+            #     cu_mask=int_to_maskarr(cu_mask_int, self.mask_words)
+            #     self.streams.append(stream_with_cu_mask(cu_mask)) #TODO complementary mask for prefill
             #self.streams.append(priority_stream_nonblocking())
                 #self.streams.append(torch.cuda.Stream())
-        else:
             #logger.info("assigning complementary streams")            
             #self.streams.append(torch.cuda.Stream()) #giving a higher number for lower priority
             #check_stream_flags(self.streams[0])
-            self.streams.append(torch.cuda.Stream())
+            # self.streams.append(torch.cuda.Stream())
             #self.streams.append(torch.cuda.Stream())
             #self.streams.append(priority_stream_nonblocking())
             #for i in range(9):
             #   self.streams.append(priority_stream_nonblocking())
             #self.streams.append(priority_stream_nonblocking())
             #check_stream_flags(self.streams[1])
-            for i in range(1,4):
-                decode_mask_int=(1<<32*i)-1
-                cu_mask_int=((1 << self.n_cu) - 1) ^ decode_mask_int
-                #cu_mask_int=(1<<32*i)-1
-                cu_mask=int_to_maskarr(cu_mask_int, self.mask_words)
-                self.streams.append(stream_with_cu_mask(cu_mask)) #TODO complementary mask for prefill
+            # for i in range(1,4):
+            #     decode_mask_int=(1<<32*i)-1
+            #     cu_mask_int=((1 << self.n_cu) - 1) ^ decode_mask_int
+            #     #cu_mask_int=(1<<32*i)-1
+            #     cu_mask=int_to_maskarr(cu_mask_int, self.mask_words)
+            #     self.streams.append(stream_with_cu_mask(cu_mask)) #TODO complementary mask for prefill
                 #self.streams.append(torch.cuda.Stream())
             #self.streams.append(priority_stream_nonblocking())
         # self.model_stream=None #self.streams[0]
