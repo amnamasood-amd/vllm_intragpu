@@ -102,6 +102,8 @@ import torch.multiprocessing as mp
 import pickle
 from vllm.distributed.parallel_state import get_world_group
 import os
+from torch.profiler import profile, ProfilerActivity, record_function
+
 
 
 logger = init_logger(__name__)
@@ -351,9 +353,9 @@ class GPUModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
         self.streams: list[torch.cuda.Stream] = []
         if self.kv_transfer_config.kv_role == "kv_producer":
             #logger.info("assigning streams")
-            #self.streams.append(torch.cuda.Stream())
+            #self.streams.append(torch.cuda.Stream(priority=-1))
             #self.streams.append(regular_stream())
-            #self.streams.append(torch.cuda.Stream())
+            self.streams.append(torch.cuda.Stream())
             #check_stream_flags(self.streams[0])
             #self.streams.append(priority_stream_nonblocking())
             #self.streams.append(torch.cuda.Stream())
@@ -361,45 +363,55 @@ class GPUModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
             #    self.streams.append(priority_stream_nonblocking())
             #check_stream_flags(self.streams[1])
             #self.streams.append(regular_stream_nonblocking())
-            self.streams.append(regular_stream_nonblocking())
-            # cu_mask_int=(1<<128)-1
+            #self.streams.append(regular_stream_nonblocking())
+            # cu_mask_int=(1<<320)-1
             # cu_mask=int_to_maskarr(cu_mask_int, self.mask_words)
             # self.streams.append(stream_with_cu_mask(cu_mask))
             # cu_mask_int=(1<<256)-1
             # cu_mask=int_to_maskarr(cu_mask_int, self.mask_words)
             # self.streams.append(stream_with_cu_mask(cu_mask))
-            for i in range(1,6):
-                cu_mask_int=(1<<32*i)-1
+            for i in range(1,5):
+                cu_mask_int=(1<<(64*i+128))-1
                 cu_mask=int_to_maskarr(cu_mask_int, self.mask_words)
                 self.streams.append(stream_with_cu_mask(cu_mask)) #TODO complementary mask for prefill
             #self.streams.append(priority_stream_nonblocking())
                 #self.streams.append(torch.cuda.Stream())
+            self.record_iteration=512
         else:
             #logger.info("assigning complementary streams")            
             #self.streams.append(torch.cuda.Stream()) #giving a higher number for lower priority
             #check_stream_flags(self.streams[0])
             #self.streams.append(torch.cuda.Stream())
             
-            #self.streams.append(torch.cuda.Stream())
+            self.streams.append(torch.cuda.Stream())
             #self.streams.append(regular_stream())
-            self.streams.append(regular_stream_nonblocking())
+            #self.streams.append(regular_stream_nonblocking())
             #for i in range(9):
             #   self.streams.append(priority_stream_nonblocking())
             #self.streams.append(priority_stream_nonblocking())
             #check_stream_flags(self.streams[1])
-            # decode_mask_int=(1<<128)-1
-            # cu_mask_int=((1 << self.n_cu) - 1) ^ decode_mask_int
+            # cu_mask_int=(1<<320)-1
             # cu_mask=int_to_maskarr(cu_mask_int, self.mask_words)
             # self.streams.append(stream_with_cu_mask(cu_mask))
-            for i in range(1,6):
-                decode_mask_int=(1<<32*i)-1
+            for i in range(1,5):
+                decode_mask_int=(1<<64*i)-1
                 cu_mask_int=((1 << self.n_cu) - 1) ^ decode_mask_int
-                #cu_mask_int=(1<<32*i)-1
                 cu_mask=int_to_maskarr(cu_mask_int, self.mask_words)
                 self.streams.append(stream_with_cu_mask(cu_mask)) #TODO complementary mask for prefill
-                #self.streams.append(torch.cuda.Stream())
+                #self.streams.append(regular_stream())
             #self.streams.append(priority_stream_nonblocking())
-        # self.model_stream=None #self.streams[0]
+            self.record_iteration=3
+        self.def_stream=torch.cuda.default_stream()
+        self.prev_cu_mask_int: Optional[int] = None
+
+        self.timing_events=[]
+        for i in range(8):
+            self.timing_events.append(torch.cuda.Event(enable_timing=True))
+        self.sync_event=torch.cuda.Event()
+
+        self.current_iteration=0
+        
+        #torch.cuda.set_sync_debug_mode("warn")
 
     def _make_buffer(self, *args, dtype: torch.dtype) -> CpuGpuBuffer:
         return CpuGpuBuffer(*args,
@@ -1540,7 +1552,21 @@ class GPUModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
         intermediate_tensors: Optional[IntermediateTensors] = None,
     ) -> Union[ModelRunnerOutput, IntermediateTensors]:
         self._update_states(scheduler_output)
+
+        #self.current_iteration+=1
+        #with profile(activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA], with_stack=True, experimental_config=torch._C._profiler._ExperimentalConfig(verbose=True),) as prof:
+        #  with record_function("model_inference"+str(self.current_iteration)):
+        # logger.info("current iteration %d",self.current_iteration )
+        # if self.current_iteration==1:
+        #     torch.cuda.memory._record_memory_history()
+
         if not scheduler_output.total_num_scheduled_tokens:
+            #if scheduler_output.cu_mask_int != self.prev_cu_mask_int:
+                # if self.prev_cu_mask_int is not None:
+                #     self.streams[self.prev_cu_mask_int].synchronize()
+                # else:
+                #     self.streams[0].synchronize()
+
             if not has_kv_transfer_group():
                 # Return empty ModelRunnerOutput if there's no work to do.
                 return EMPTY_MODEL_RUNNER_OUTPUT
@@ -1554,12 +1580,36 @@ class GPUModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
                 "prompt tokens, tokens, please disable it when the requests "
                 "need prompt logprobs")
 
+        #logger.info("streams[0]: %d",self.streams[0].cuda_stream)
+        #logger.info("current_stream: %d",torch.cuda.current_stream().cuda_stream)
+        # sync_event=None
+        if scheduler_output.cu_mask_int is not None:
+            if scheduler_output.cu_mask_int < 5:
+                #cu_mask_int=min(4,scheduler_output.cu_mask_int)
+                current_stream=self.streams[scheduler_output.cu_mask_int]
+                #current_stream=self.streams[0]
+                #sync_event=torch.cuda.Event()
+            else:
+                scheduler_output.cu_mask_int=None
+                current_stream=self.streams[0]
+            #logger.info("cu_mask_int %d", cu_mask_int)
+            #current_stream=self.streams[0]
+        else:
+            #logger.info("cu_mask_int is none")
+            current_stream=self.streams[0]
+        #current_stream=self.streams[0]
+        sync_event=torch.cuda.Event()
+        # self.prev_cu_mask_int=scheduler_output.cu_mask_int
+        # #torch.cuda.set_stream(self.model_stream)
+        
+        #with torch.cuda.stream(current_stream):
         # Prepare the decoder inputs.
         (attn_metadata, logits_indices, spec_decode_metadata,
-         num_scheduled_tokens_np, spec_decode_common_attn_metadata,
-         max_query_len) = self._prepare_inputs(scheduler_output)
+        num_scheduled_tokens_np, spec_decode_common_attn_metadata,
+        max_query_len) = self._prepare_inputs(scheduler_output)
         #logger.info("Printing attn_metadata")
         #print(attn_metadata)
+    
         num_scheduled_tokens = scheduler_output.total_num_scheduled_tokens
         if (self.compilation_config.cudagraph_mode != CUDAGraphMode.NONE
                 and not envs.VLLM_DISABLE_PAD_FOR_CUDAGRAPH
@@ -1633,7 +1683,8 @@ class GPUModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
         uniform_decode = (max_query_len == self.uniform_decode_query_len) and (
             num_scheduled_tokens == self.input_batch.num_reqs * max_query_len)
         batch_descriptor = BatchDescriptor(num_tokens=num_input_tokens,
-                                           uniform_decode=uniform_decode)
+                                        uniform_decode=uniform_decode)
+        
         cudagraph_runtime_mode, batch_descriptor = \
             self.cudagraph_dispatcher.dispatch(batch_descriptor)
 
@@ -1654,31 +1705,26 @@ class GPUModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
         #     #logger.info("assigning self.model_stream")
         #     current_stream=self.model_stream
 
-        if scheduler_output.cu_mask_int is not None:
-            cu_mask_int=min(5,scheduler_output.cu_mask_int)
-            current_stream=self.streams[5]
-            #logger.info("cu_mask_int %d", cu_mask_int)
-            #current_stream=self.streams[0]
-        else:
-            #logger.info("cu_mask_int is none")
-            current_stream=self.streams[5]
+        
         
         #current_stream=self.model_stream
 
         #current_stream=torch.cuda.Stream()
         # Run the model.
         # Use persistent buffers for CUDA graphs.
+        #with torch.cuda.stream(current_stream):
+        
         with set_forward_context(
-                attn_metadata,
-                self.vllm_config,
-                num_tokens=num_input_tokens,
-                num_tokens_across_dp=num_tokens_across_dp,
-                cudagraph_runtime_mode=cudagraph_runtime_mode,
-                batch_descriptor=batch_descriptor,
-                cuda_stream=current_stream,
+                    attn_metadata,
+                    self.vllm_config,
+                    num_tokens=num_input_tokens,
+                    num_tokens_across_dp=num_tokens_across_dp,
+                    cudagraph_runtime_mode=cudagraph_runtime_mode,
+                    batch_descriptor=batch_descriptor,
+                    cuda_stream=current_stream,
         ), self.maybe_get_kv_connector_output(scheduler_output) as kv_connector_output:
-
-            with torch.cuda.stream(current_stream):
+            with torch.cuda.stream(current_stream) as s:
+                #self.timing_events[0].record(stream=s)
                 model_output = self.model(
                     input_ids=input_ids,
                     positions=positions,
@@ -1686,176 +1732,339 @@ class GPUModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
                     inputs_embeds=inputs_embeds,
                     **model_kwargs,
                 )
-
-        #del current_stream
-        # if current_stream is not self.model_stream:
-        #     #logger.info("destroying stream")
-        #     destroy_external_stream(current_stream)
-
-        if self.use_aux_hidden_state_outputs:
-            hidden_states, aux_hidden_states = model_output
-        else:
+        #current_stream.synchronize()
+                #if self.kv_transfer_config.kv_role == "kv_producer":
+                sync_event.record(stream=s)
+           
+        # #torch.cuda.current_stream().wait_event(self.sync_event)
+        #self.def_stream.wait_event(sync_event)
+        if self.kv_transfer_config.kv_role == "kv_producer":
+            self.def_stream.wait_event(sync_event)
             hidden_states = model_output
             aux_hidden_states = None
 
+            sample_hidden_states = hidden_states[logits_indices]
+
+            sample_hidden_states = self.model.lm_head.quant_method.apply(self.model.lm_head,
+                                            sample_hidden_states)       
+            logits = self.model.compute_logits(sample_hidden_states, None)
+            if scheduler_output.grammar_bitmask is not None:
+                self.apply_grammar_bitmask(scheduler_output, logits)
+
+            # Sample the next token and get logprobs if needed.
+            sampling_metadata = self.input_batch.sampling_metadata
+            if spec_decode_metadata is None:
+                sampler_output = self.sampler(
+                    logits=logits,
+                    sampling_metadata=sampling_metadata,
+                )
+            else:
+                # When indexing with a tensor (bonus_logits_indices), PyTorch
+                # creates a new tensor with separate storage from the original
+                # logits tensor. This means any in-place operations on bonus_logits
+                # won't affect the original logits tensor.
+                assert logits is not None
+                bonus_logits = logits[spec_decode_metadata.bonus_logits_indices]
+                sampler_output = self.sampler(
+                    logits=bonus_logits,
+                    sampling_metadata=sampling_metadata,
+                )
+                bonus_token_ids = sampler_output.sampled_token_ids
+
+                # Just like `bonus_logits`, `target_logits` is a new tensor with
+                # separate storage from the original `logits` tensor. Therefore,
+                # it is safe to update `target_logits` in place.
+                target_logits = logits[spec_decode_metadata.target_logits_indices]
+                output_token_ids = self.rejection_sampler(
+                    spec_decode_metadata,
+                    None,  # draft_probs
+                    target_logits,
+                    bonus_token_ids,
+                    sampling_metadata,
+                )
+                sampler_output.sampled_token_ids = output_token_ids
+            
+            #self.timing_events[6].record()
+            num_nans_in_logits = {}
+            if envs.VLLM_COMPUTE_NANS_IN_LOGITS:
+                num_nans_in_logits = self._get_nans_in_logits(logits)
+
+            # TODO(woosuk): The following loop can be slow since it iterates over
+            # the requests one by one. Optimize.
+            discard_sampled_tokens_req_indices = []
+            for i, req_id in enumerate(self.input_batch.req_ids):
+                req_state = self.requests[req_id]
+                seq_len = (req_state.num_computed_tokens +
+                        scheduler_output.num_scheduled_tokens[req_id])
+                if seq_len < req_state.num_tokens:
+                    # Ignore the sampled token for partial prefills.
+                    # Rewind the generator state as if the token was not sampled.
+                    # This relies on cuda-specific torch-internal impl details
+                    generator = self.input_batch.generators.get(i)
+                    if generator is not None:
+                        generator.set_offset(generator.get_offset() - 4)
+                    # Record the index of the request that should not be sampled,
+                    # so that we could clear the sampled tokens before returning.
+                    discard_sampled_tokens_req_indices.append(i)
+                    #if s is not self.streams[0]:
+                    #self.sync_event.record(stream=s)
+                    #model_output.record_stream(current_stream)
+                    #self.timing_events[1].record(stream=s)
+            #cpu->gpu sync
+            logprobs_tensors = sampler_output.logprobs_tensors
+            logprobs_lists = logprobs_tensors.tolists() \
+                if logprobs_tensors is not None else None
+
+            # Compute prompt logprobs if needed.
+            prompt_logprobs_dict = self._get_prompt_logprobs_dict(
+                hidden_states[:num_scheduled_tokens],
+                scheduler_output.num_scheduled_tokens,
+            )
+
+            # Get the valid generated tokens.
+            sampled_token_ids = sampler_output.sampled_token_ids
+            max_gen_len = sampled_token_ids.shape[-1]
+            if max_gen_len == 1:
+                # No spec decode tokens.
+                valid_sampled_token_ids = self._to_list(sampled_token_ids)
+            else:
+                # Includes spec decode tokens.
+                valid_sampled_token_ids = self.rejection_sampler.parse_output(
+                    sampled_token_ids,
+                    self.input_batch.vocab_size,
+                )
+            # Mask out the sampled tokens that should not be sampled.
+            for i in discard_sampled_tokens_req_indices:
+                valid_sampled_token_ids[i].clear()
+
+            # Cache the sampled tokens in the model runner, so that the scheduler
+            # doesn't need to send them back.
+            # NOTE(woosuk): As an exception, when using PP, the scheduler sends
+            # the sampled tokens back, because there's no direct communication
+            # between the first-stage worker and the last-stage worker.
+            req_ids = self.input_batch.req_ids
+            for req_idx, sampled_ids in enumerate(valid_sampled_token_ids):
+                if not sampled_ids:
+                    continue
+
+                start_idx = self.input_batch.num_tokens_no_spec[req_idx]
+                end_idx = start_idx + len(sampled_ids)
+                assert end_idx <= self.max_model_len, (
+                    "Sampled token IDs exceed the max model length. "
+                    f"Total number of tokens: {end_idx} > max_model_len: "
+                    f"{self.max_model_len}")
+
+                self.input_batch.token_ids_cpu[req_idx,
+                                            start_idx:end_idx] = sampled_ids
+                self.input_batch.num_tokens_no_spec[req_idx] = end_idx
+                self.input_batch.num_tokens[req_idx] = end_idx
+                req_id = req_ids[req_idx]
+                req_state = self.requests[req_id]
+                req_state.output_token_ids.extend(sampled_ids)
+
+            if self.speculative_config:
+                assert spec_decode_common_attn_metadata is not None
+                self._draft_token_ids = self.propose_draft_token_ids(
+                    scheduler_output,
+                    valid_sampled_token_ids,
+                    sampling_metadata,
+                    hidden_states,
+                    sample_hidden_states,
+                    aux_hidden_states,
+                    spec_decode_metadata,
+                    spec_decode_common_attn_metadata,
+                )
+
+            self.eplb_step()     
+            
+        else:
+            #with torch.cuda.stream(current_stream):
+            # hidden_states=model_output
+            # logits=hidden_states[logits_indices]
+            # sampling_metadata = self.input_batch.sampling_metadata
+            
+            # sampler_output = self.sampler(
+            #     logits=logits,
+            #     sampling_metadata=sampling_metadata,
+            # )
+            # num_nans_in_logits = {}
+            # # if envs.VLLM_COMPUTE_NANS_IN_LOGITS:
+            # #     num_nans_in_logits = self._get_nans_in_logits(logits)
+            # discard_sampled_tokens_req_indices = []
+            #self.def_stream.wait_event(sync_event)
+            current_stream.synchronize()
+            
+            valid_sampled_token_ids=[]
+            logprobs_lists=[]
+            prompt_logprobs_dict={}
+            num_nans_in_logits=[]
+        
+        #current_stream.synchronize()
+        #         self.sync_event.record(stream=s)
+        # #torch.cuda.current_stream().wait_event(self.sync_event)
+        # self.def_stream.wait_event(self.sync_event)       
+        # if sync_event is not None:
+        #     sync_event.record(stream=s)
+
+        # if sync_event is not None:
+        #     torch.cuda.current_stream().wait_event(sync_event)
+        #if self.kv_transfer_config.kv_role == "kv_producer": 
+        
+
+        
+        #self.timing_events[5].record()
+        
+                
+        #if current_stream is not self.streams[0]:
+        #torch.cuda.current_stream().wait_event(self.sync_event)
+        #torch.cuda.current_stream().wait_stream(current_stream)
+        ##self.timing_events[2].record()
+        # if self.use_aux_hidden_state_outputs:
+        #     hidden_states, aux_hidden_states = model_output
+        # else:
+        #     hidden_states = model_output
+        #     aux_hidden_states = None
+
+        # hidden_states = model_output
+        # aux_hidden_states = None
+
+        # #self.timing_events[2].record(stream=s)
+
+        # sample_hidden_states = hidden_states[logits_indices]
+
+        # #self.timing_events[3].record(stream=s)
+
+        #sample_hidden_states = self.model.lm_head.quant_method.apply(self.model.lm_head,
+        #                            sample_hidden_states)
+        # if current_stream is not self.streams[0]:
+        #     torch.cuda.current_stream().wait_event(self.sync_event)
+        #self.sync_event.record(stream=s)
+        #self.timing_events[4].record(stream=s)
+        #self.timing_events[5].record()
+        #torch.cuda.current_stream().wait_event(self.sync_event)
+        #logits = self.model.compute_logits(sample_hidden_states, None)
+        #self.timing_events[6].record()
         # Broadcast PP output for external_launcher (torchrun)
         # to make sure we are synced across pp ranks
         # TODO: Support overlapping mirco-batches
         # https://github.com/vllm-project/vllm/issues/18019
-        broadcast_pp_output = \
-            self.parallel_config.distributed_executor_backend \
-            == "external_launcher" and len(get_pp_group().ranks) > 0
-        if not get_pp_group().is_last_rank:
-            # For mid-pipeline stages, return the hidden states.
-            assert isinstance(hidden_states, IntermediateTensors)
-            if not broadcast_pp_output:
-                hidden_states.kv_connector_output = kv_connector_output
-                return hidden_states
-            get_pp_group().send_tensor_dict(hidden_states.tensors,
-                                            all_gather_group=get_tp_group())
-            logits = None
-        else:
-            if self.is_pooling_model:
-                return self._pool(hidden_states, num_scheduled_tokens,
-                                  num_scheduled_tokens_np, kv_connector_output)
+        # broadcast_pp_output = \
+        #     self.parallel_config.distributed_executor_backend \
+        #     == "external_launcher" and len(get_pp_group().ranks) > 0
+        # if not get_pp_group().is_last_rank:
+        #     # For mid-pipeline stages, return the hidden states.
+        #     assert isinstance(hidden_states, IntermediateTensors)
+        #     if not broadcast_pp_output:
+        #         hidden_states.kv_connector_output = kv_connector_output
+        #         return hidden_states
+        #     get_pp_group().send_tensor_dict(hidden_states.tensors,
+        #                                     all_gather_group=get_tp_group())
+        #     logits = None
+        # else:
+        #     #self.timing_events[2].record()
+        #     if self.is_pooling_model:
+        #         return self._pool(hidden_states, num_scheduled_tokens,
+        #                         num_scheduled_tokens_np, kv_connector_output)
 
-            sample_hidden_states = hidden_states[logits_indices]
-            logits = self.model.compute_logits(sample_hidden_states, None)
-        if broadcast_pp_output:
-            model_output_broadcast_data = {
-                "logits": logits.contiguous(),
-            } if logits is not None else {}
-            model_output_broadcast_data = get_pp_group().broadcast_tensor_dict(
-                model_output_broadcast_data, src=len(get_pp_group().ranks) - 1)
-            assert model_output_broadcast_data is not None
-            logits = model_output_broadcast_data["logits"]
-
+        #     sample_hidden_states = hidden_states[logits_indices]
+        #     #self.timing_events[3].record()
+        #     #logits = self.model.compute_logits_stream(sample_hidden_states, None, cuda_stream=current_stream)
+        #     logits = self.model.compute_logits(sample_hidden_states, None)
+        #     #self.timing_events[4].record()
+        ##self.timing_events[3].record()
+        # if broadcast_pp_output:
+        #     model_output_broadcast_data = {
+        #         "logits": logits.contiguous(),
+        #     } if logits is not None else {}
+        #     model_output_broadcast_data = get_pp_group().broadcast_tensor_dict(
+        #         model_output_broadcast_data, src=len(get_pp_group().ranks) - 1)
+        #     assert model_output_broadcast_data is not None
+        #     logits = model_output_broadcast_data["logits"]
+        ##self.timing_events[4].record()
         # Apply structured output bitmasks if present
-        if scheduler_output.grammar_bitmask is not None:
-            self.apply_grammar_bitmask(scheduler_output, logits)
+        # if scheduler_output.grammar_bitmask is not None:
+        #     self.apply_grammar_bitmask(scheduler_output, logits)
+        # #self.timing_events[5].record()
+        # # Sample the next token and get logprobs if needed.
+        # sampling_metadata = self.input_batch.sampling_metadata
+        # if spec_decode_metadata is None:
+        #     sampler_output = self.sampler(
+        #         logits=logits,
+        #         sampling_metadata=sampling_metadata,
+        #     )
+        # else:
+        #     # When indexing with a tensor (bonus_logits_indices), PyTorch
+        #     # creates a new tensor with separate storage from the original
+        #     # logits tensor. This means any in-place operations on bonus_logits
+        #     # won't affect the original logits tensor.
+        #     assert logits is not None
+        #     bonus_logits = logits[spec_decode_metadata.bonus_logits_indices]
+        #     sampler_output = self.sampler(
+        #         logits=bonus_logits,
+        #         sampling_metadata=sampling_metadata,
+        #     )
+        #     bonus_token_ids = sampler_output.sampled_token_ids
 
-        # Sample the next token and get logprobs if needed.
-        sampling_metadata = self.input_batch.sampling_metadata
-        if spec_decode_metadata is None:
-            sampler_output = self.sampler(
-                logits=logits,
-                sampling_metadata=sampling_metadata,
-            )
-        else:
-            # When indexing with a tensor (bonus_logits_indices), PyTorch
-            # creates a new tensor with separate storage from the original
-            # logits tensor. This means any in-place operations on bonus_logits
-            # won't affect the original logits tensor.
-            assert logits is not None
-            bonus_logits = logits[spec_decode_metadata.bonus_logits_indices]
-            sampler_output = self.sampler(
-                logits=bonus_logits,
-                sampling_metadata=sampling_metadata,
-            )
-            bonus_token_ids = sampler_output.sampled_token_ids
+        #     # Just like `bonus_logits`, `target_logits` is a new tensor with
+        #     # separate storage from the original `logits` tensor. Therefore,
+        #     # it is safe to update `target_logits` in place.
+        #     target_logits = logits[spec_decode_metadata.target_logits_indices]
+        #     output_token_ids = self.rejection_sampler(
+        #         spec_decode_metadata,
+        #         None,  # draft_probs
+        #         target_logits,
+        #         bonus_token_ids,
+        #         sampling_metadata,
+        #     )
+        #     sampler_output.sampled_token_ids = output_token_ids
+        
+        # #self.timing_events[6].record()
+        # num_nans_in_logits = {}
+        # if envs.VLLM_COMPUTE_NANS_IN_LOGITS:
+        #     num_nans_in_logits = self._get_nans_in_logits(logits)
 
-            # Just like `bonus_logits`, `target_logits` is a new tensor with
-            # separate storage from the original `logits` tensor. Therefore,
-            # it is safe to update `target_logits` in place.
-            target_logits = logits[spec_decode_metadata.target_logits_indices]
-            output_token_ids = self.rejection_sampler(
-                spec_decode_metadata,
-                None,  # draft_probs
-                target_logits,
-                bonus_token_ids,
-                sampling_metadata,
-            )
-            sampler_output.sampled_token_ids = output_token_ids
-
-        num_nans_in_logits = {}
-        if envs.VLLM_COMPUTE_NANS_IN_LOGITS:
-            num_nans_in_logits = self._get_nans_in_logits(logits)
-
-        # TODO(woosuk): The following loop can be slow since it iterates over
-        # the requests one by one. Optimize.
-        discard_sampled_tokens_req_indices = []
-        for i, req_id in enumerate(self.input_batch.req_ids):
-            req_state = self.requests[req_id]
-            seq_len = (req_state.num_computed_tokens +
-                       scheduler_output.num_scheduled_tokens[req_id])
-            if seq_len < req_state.num_tokens:
-                # Ignore the sampled token for partial prefills.
-                # Rewind the generator state as if the token was not sampled.
-                # This relies on cuda-specific torch-internal impl details
-                generator = self.input_batch.generators.get(i)
-                if generator is not None:
-                    generator.set_offset(generator.get_offset() - 4)
-                # Record the index of the request that should not be sampled,
-                # so that we could clear the sampled tokens before returning.
-                discard_sampled_tokens_req_indices.append(i)
-
+        # # TODO(woosuk): The following loop can be slow since it iterates over
+        # # the requests one by one. Optimize.
+        # discard_sampled_tokens_req_indices = []
+        # for i, req_id in enumerate(self.input_batch.req_ids):
+        #     req_state = self.requests[req_id]
+        #     seq_len = (req_state.num_computed_tokens +
+        #             scheduler_output.num_scheduled_tokens[req_id])
+        #     if seq_len < req_state.num_tokens:
+        #         # Ignore the sampled token for partial prefills.
+        #         # Rewind the generator state as if the token was not sampled.
+        #         # This relies on cuda-specific torch-internal impl details
+        #         generator = self.input_batch.generators.get(i)
+        #         if generator is not None:
+        #             generator.set_offset(generator.get_offset() - 4)
+        #         # Record the index of the request that should not be sampled,
+        #         # so that we could clear the sampled tokens before returning.
+        #         discard_sampled_tokens_req_indices.append(i)
+        
+        #self.sync_event.synchronize()
+        # self.timing_events[7].record()
+        # current_stream.synchronize()
+        # torch.cuda.current_stream().synchronize()
+        # elapsed_time_model_ms = self.timing_events[0].elapsed_time(self.timing_events[1])
+        # elapsed_time_later1_ms = self.timing_events[1].elapsed_time(self.timing_events[2])
+        # elapsed_time_later2_ms = self.timing_events[2].elapsed_time(self.timing_events[3])
+        # elapsed_time_later3_ms = self.timing_events[3].elapsed_time(self.timing_events[4])
+        # elapsed_time_later4_ms = self.timing_events[4].elapsed_time(self.timing_events[5])
+        # elapsed_time_later5_ms = self.timing_events[5].elapsed_time(self.timing_events[6])
+        # elapsed_time_later6_ms = self.timing_events[6].elapsed_time(self.timing_events[7])
+        # elapsed_time_later_ms = self.timing_events[2].elapsed_time(self.timing_events[7])
+        # logger.info("model time %d later time %d later time1 %d later time2 %d later time3 %d later time4 %d later time5 %d later time6 %d", elapsed_time_model_ms, elapsed_time_later_ms, elapsed_time_later1_ms, elapsed_time_later2_ms, elapsed_time_later3_ms, elapsed_time_later4_ms, elapsed_time_later5_ms, elapsed_time_later6_ms)
         # NOTE: GPU -> CPU Sync happens here.
         # Move as many CPU operations as possible before this sync point.
-        logprobs_tensors = sampler_output.logprobs_tensors
-        logprobs_lists = logprobs_tensors.tolists() \
-            if logprobs_tensors is not None else None
-
-        # Compute prompt logprobs if needed.
-        prompt_logprobs_dict = self._get_prompt_logprobs_dict(
-            hidden_states[:num_scheduled_tokens],
-            scheduler_output.num_scheduled_tokens,
-        )
-
-        # Get the valid generated tokens.
-        sampled_token_ids = sampler_output.sampled_token_ids
-        max_gen_len = sampled_token_ids.shape[-1]
-        if max_gen_len == 1:
-            # No spec decode tokens.
-            valid_sampled_token_ids = self._to_list(sampled_token_ids)
-        else:
-            # Includes spec decode tokens.
-            valid_sampled_token_ids = self.rejection_sampler.parse_output(
-                sampled_token_ids,
-                self.input_batch.vocab_size,
-            )
-        # Mask out the sampled tokens that should not be sampled.
-        for i in discard_sampled_tokens_req_indices:
-            valid_sampled_token_ids[i].clear()
-
-        # Cache the sampled tokens in the model runner, so that the scheduler
-        # doesn't need to send them back.
-        # NOTE(woosuk): As an exception, when using PP, the scheduler sends
-        # the sampled tokens back, because there's no direct communication
-        # between the first-stage worker and the last-stage worker.
-        req_ids = self.input_batch.req_ids
-        for req_idx, sampled_ids in enumerate(valid_sampled_token_ids):
-            if not sampled_ids:
-                continue
-
-            start_idx = self.input_batch.num_tokens_no_spec[req_idx]
-            end_idx = start_idx + len(sampled_ids)
-            assert end_idx <= self.max_model_len, (
-                "Sampled token IDs exceed the max model length. "
-                f"Total number of tokens: {end_idx} > max_model_len: "
-                f"{self.max_model_len}")
-
-            self.input_batch.token_ids_cpu[req_idx,
-                                           start_idx:end_idx] = sampled_ids
-            self.input_batch.num_tokens_no_spec[req_idx] = end_idx
-            self.input_batch.num_tokens[req_idx] = end_idx
-            req_id = req_ids[req_idx]
-            req_state = self.requests[req_id]
-            req_state.output_token_ids.extend(sampled_ids)
-
-        if self.speculative_config:
-            assert spec_decode_common_attn_metadata is not None
-            self._draft_token_ids = self.propose_draft_token_ids(
-                scheduler_output,
-                valid_sampled_token_ids,
-                sampling_metadata,
-                hidden_states,
-                sample_hidden_states,
-                aux_hidden_states,
-                spec_decode_metadata,
-                spec_decode_common_attn_metadata,
-            )
-
-        self.eplb_step()
+        
+        
+        #if scheduler_output.cu_mask_int is not None:
+        #    current_stream.synchronize()
+        
+        #if self.current_iteration==self.record_iteration:
+        #    prof.export_chrome_trace("external_trace_syncevent"+str(self.record_iteration)+str(torch.cuda.current_device())+".json")
+        #     logger.info("recording iteration")
+        #     torch.cuda.memory._dump_snapshot("/workspace/torch_snapshot"+str(self.record_iteration)+str(torch.cuda.current_device())+".pkl")
 
         return ModelRunnerOutput(
             req_ids=self.input_batch.req_ids,
@@ -2491,7 +2700,8 @@ class GPUModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
                     num_tokens=num_tokens,
                     num_tokens_across_dp=num_tokens_across_dp,
                     cudagraph_runtime_mode=cudagraph_runtime_mode,
-                    batch_descriptor=batch_descriptor):
+                    batch_descriptor=batch_descriptor,
+                    cuda_stream=self.streams[0]):
                 outputs = self.model(
                     input_ids=input_ids,
                     positions=positions,
@@ -2757,10 +2967,15 @@ class GPUModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
                 if should_freeze:
                     gc.unfreeze()
 
+        uniform_decode=False
+        if self.kv_transfer_config.kv_role == "kv_producer":
+            uniform_decode=True
+
+
         # Trigger CUDA graph capture for specific shapes.
         # Capture the large shapes first so that the smaller shapes
         # can reuse the memory pool allocated for the large shapes.
-        set_cudagraph_capturing_enabled(True)
+        set_cudagraph_capturing_enabled(True)       
         with freeze_gc(), graph_capture(device=self.device):
             cudagraph_mode = self.compilation_config.cudagraph_mode
             if cudagraph_mode.mixed_mode() != CUDAGraphMode.NONE:
@@ -2770,7 +2985,7 @@ class GPUModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
                 self._capture_cudagraphs(
                     compilation_cases,
                     cudagraph_runtime_mode=cudagraph_runtime_mode,
-                    uniform_decode=False)
+                    uniform_decode=uniform_decode)
 
             # Capture full cudagraph for uniform decode batches if we have
             # dont already have full mixed prefill-decode cudagraphs

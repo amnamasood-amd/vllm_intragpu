@@ -92,29 +92,33 @@ streams=[]
 #    streams.append(torch.cuda.Stream())
     #print(streams[i].cuda_stream)
 #streams.append(torch.cuda.Stream())
-for i in range(32):
-    streams.append(regular_stream_nonblocking())
-for i in range(32):
-    streams.append(priority_stream_nonblocking())
+streams.append(regular_stream_nonblocking())
+#streams.append(torch.cuda.Stream())
+# for i in range(32):
+#     streams.append(regular_stream_nonblocking())
+# for i in range(32):
+#     streams.append(priority_stream_nonblocking())
 #check_stream_flags(streams[0])
 #check_stream_flags(priority_stream_nonblocking())
-#print(streams[0].priority)
+#print(streams].priority)
 #streams.append(regular_stream())
-for i in range(1,20):
+for i in range(10):
     cu_mask_int=(1<<32*i)-1
     #print(cu_mask_int)
     cu_mask=int_to_maskarr(cu_mask_int,10)
     #print(cu_mask)
     streams.append(stream_with_cu_mask(cu_mask))
-    #check_stream_flags(streams[i])
+    check_stream_flags(streams[i])
     #streams.append(torch.cuda.Stream())
 
-# x=torch.rand(1024,1024).to("cuda:0")
-# y=torch.rand(1024,1024).to("cuda:0")
+# x=torch.rand(1024,1024)
+# y=torch.rand(1024,1024)
 # z = []
 # #print(x)
-# for s in streams:
-#     with torch.cuda.stream(s):
-#         z.append(torch.matmul(x,y))
+# s=streams[0]
+# #for s in streams[:2]:
+# #for i in range(10):
+# with torch.cuda.stream(s):
+#         z.append(torch.matmul(x.to("cuda:0"),y.to("cuda:0")))
 
 # print(z)

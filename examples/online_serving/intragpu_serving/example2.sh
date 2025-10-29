@@ -167,7 +167,7 @@ main() {
         local kv_port=$((22001 + i))
 
         echo "  Decode server $((i+1)): GPU $gpu_id, Port $port, KV Port $kv_port"
-        VLLM_USE_V1=1 CUDA_VISIBLE_DEVICES=4,5,6,7 vllm serve $MODEL \
+        VLLM_USE_V1=1 CUDA_VISIBLE_DEVICES=3,4,5,6 vllm serve $MODEL \
         --host 0.0.0.0 \
         --port $port \
         --tensor-parallel-size 4 \
@@ -175,13 +175,14 @@ main() {
         --dtype float16 \
         --max-model-len 8192 \
         --max-num-batched-tokens 10000 \
-        --max-num-seqs 256 \
         --trust-remote-code \
         --gpu-memory-utilization 0.80 \
         --no-enable-prefix-caching \
+        --compilation-config '{"cudagraph_mode":"FULL"}' \
         --kv-transfer-config \
-        "{\"kv_connector\":\"IntraGPUConnector\",\"kv_role\":\"kv_producer\",\"kv_buffer_size\":\"8e9\",\"kv_port\":\"$kv_port\"}" > decode.log &
+        "{\"kv_connector\":\"IntraGPUConnector\",\"kv_role\":\"kv_producer\",\"kv_buffer_size\":\"8e9\",\"kv_port\":\"$kv_port\"}" > decode.log 2> decode_external.log &
         PIDS+=($!)
+        #--enforce-eager \
         #--max-num-seqs 256 \
         #--compilation-config '{"cudagraph_mode":"FULL"}' \
     done
@@ -210,7 +211,7 @@ main() {
         local kv_port=$((21001 + i))
 
         echo "  Prefill server $((i+1)): GPU $gpu_id, Port $port, KV Port $kv_port"
-        CUDA_VISIBLE_DEVICES=4,5,6,7 VLLM_USE_V1=1 vllm serve $MODEL \
+        CUDA_VISIBLE_DEVICES=3,4,5,6 VLLM_USE_V1=1 vllm serve $MODEL \
         --host 0.0.0.0 \
         --port $port \
         --tensor-parallel-size 4 \
@@ -218,15 +219,15 @@ main() {
         --dtype float16 \
         --max-model-len 8192 \
         --max-num-batched-tokens 10000 \
-        --max-num-seqs 256 \
         --trust-remote-code \
         --gpu-memory-utilization 0.80 \
         --no-enable-prefix-caching \
         --kv-transfer-config \
-        "{\"kv_connector\":\"IntraGPUConnector\",\"kv_role\":\"kv_consumer\",\"kv_buffer_size\":\"1e1\",\"kv_port\":\"$kv_port\"}" > prefill.log &
+        "{\"kv_connector\":\"IntraGPUConnector\",\"kv_role\":\"kv_consumer\",\"kv_buffer_size\":\"1e1\",\"kv_port\":\"$kv_port\"}" > prefill.log 2> prefill_external.log &
         PIDS+=($!)
         #--max-num-seqs 256 \
         #--compilation-config '{"cudagraph_mode":"FULL"}' \
+        #--max-num-batched-tokens 100000 \
     done
     
     echo ""
@@ -268,17 +269,6 @@ main() {
         --num-prompts 512 --burstiness 100 --request-rate 50 --ignore-eos | tee benchmark.log
     
     echo "Benchmarking done. Cleaning up..."
-
-    
-    # output1=$(curl -X POST -s http://localhost:$PROXY_PORT/v1/completions \
-    # -H "Content-Type: application/json" \
-    # -d '{
-    # "model": "'"$MODEL"'",
-    # "prompt": "San Francisco is a",
-    # "max_tokens": 10,
-    # "temperature": 0
-    # }')
-    # echo $output1
 
     #python3 single_serve.py --port $PROXY_PORT --model $MODEL
     #python3 multi_serve.py --port 10001 --model $MODEL

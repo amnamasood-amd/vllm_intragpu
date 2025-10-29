@@ -34,6 +34,7 @@ from vllm.v1.utils import report_usage_stats
 from vllm.v1.worker.gpu_model_runner import GPUModelRunner
 from vllm.v1.worker.worker_base import WorkerBase
 
+
 logger = init_logger(__name__)
 
 if TYPE_CHECKING:

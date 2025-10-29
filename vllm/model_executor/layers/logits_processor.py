@@ -60,16 +60,19 @@ class LogitsProcessor(nn.Module):
         sampling_metadata: Optional[SamplingMetadata] = None,
         embedding_bias: Optional[torch.Tensor] = None,
         prune_hidden_states: bool = True,
+        cuda_stream: Optional[torch.cuda.Stream] = None,
     ) -> Optional[torch.Tensor]:
         if self.logits_as_input:
             logits = hidden_states
         else:
-            if sampling_metadata is not None and prune_hidden_states:
-                hidden_states = _prune_hidden_states(hidden_states,
-                                                     sampling_metadata)
+            # if sampling_metadata is not None and prune_hidden_states:
+            #     hidden_states = _prune_hidden_states(hidden_states,
+            #                                          sampling_metadata)
 
             # Get the logits for the next tokens.
+            #logits = self._get_logits_stream(hidden_states, lm_head, embedding_bias, cuda_stream=cuda_stream)
             logits = self._get_logits(hidden_states, lm_head, embedding_bias)
+
         if logits is not None:
             if self.soft_cap is not None:
                 logits = logits / self.soft_cap
@@ -107,9 +110,36 @@ class LogitsProcessor(nn.Module):
         embedding_bias: Optional[torch.Tensor],
     ) -> Optional[torch.Tensor]:
         # Get the logits for the next tokens.
-        logits = lm_head.quant_method.apply(lm_head,
+        # logits = lm_head.quant_method.apply(lm_head,
+        #                                     hidden_states,
+        #                                     bias=embedding_bias)
+
+        # Gather logits for TP
+        #logits = self._gather_logits(logits)
+        logits=self._gather_logits(hidden_states)
+
+        # Remove paddings in vocab (if any).
+        if logits is not None:
+            logits = logits[..., :self.org_vocab_size]
+        return logits
+
+    def _get_logits_stream(
+        self,
+        hidden_states: torch.Tensor,
+        lm_head: VocabParallelEmbedding,
+        embedding_bias: Optional[torch.Tensor],
+        cuda_stream: Optional[torch.cuda.Stream],
+    ) -> Optional[torch.Tensor]:
+        # Get the logits for the next tokens.
+        if cuda_stream is not None:
+            with torch.cuda.stream(cuda_stream):
+                logits = lm_head.quant_method.apply(lm_head,
                                             hidden_states,
                                             bias=embedding_bias)
+        else:
+            logits = lm_head.quant_method.apply(lm_head,
+                                                hidden_states,
+                                                bias=embedding_bias)
 
         # Gather logits for TP
         logits = self._gather_logits(logits)

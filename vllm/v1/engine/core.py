@@ -83,8 +83,6 @@ class EngineCore:
         self.log_stats = log_stats
 
         # Setup Model.
-        logger.info("executor_class")
-        print(executor_class)
         self.model_executor = executor_class(vllm_config)
         if executor_fail_callback is not None:
             self.model_executor.register_failure_callback(
@@ -189,7 +187,8 @@ class EngineCore:
             self.request_block_hasher = get_request_block_hasher(
                 block_size, caching_hash_fn)
 
-        self.scheduler_prefill_requests = []
+        #self.scheduler_prefill_requests = []
+        self.iteration_time_log=[]
 
     def _initialize_kv_caches(
             self, vllm_config: VllmConfig) -> tuple[int, int, KVCacheConfig]:
@@ -302,7 +301,7 @@ class EngineCore:
             self.scheduler.add_pendingallocation_request(request)
 
     def check_for_allocation(self):
-        logger.info("starting block_allocation thread")
+        #logger.info("starting block_allocation thread")
         if self.scheduler.connector.transfer_config.kv_role == "kv_producer":
             while True:
                 while self.scheduler.allocated_req_ids:
@@ -402,27 +401,35 @@ class EngineCore:
                 #self.scheduler.connector.qmgr.q.put(sched_out_prefill)
                 #print(scheduler_output.kv_connector_metadata)
                 logger.info("starting model")
+                start_time=time.monotonic()
                 model_output = self.execute_model_with_error_logging(
                     self.model_executor.execute_model,  # type: ignore
                     scheduler_output)
-                logger.info("finished model, getting outputs")
+                end_time=time.monotonic()
+                iteration_time=end_time-start_time
+                self.iteration_time_log.append([str(scheduler_output.total_num_scheduled_tokens),str(scheduler_output.cu_mask_int),str(iteration_time)])
+                logger.info("finished model, getting outputs time %f", iteration_time)
                 engine_core_outputs = self.scheduler.update_from_output(
                     scheduler_output, model_output)  # type: ignore
-                print(engine_core_outputs)
+                #print(engine_core_outputs)
             else:
                 return self.scheduler.handle_finished_requests(), False
         else:
             #return {}, True
             scheduler_output = self.scheduler.prefill_schedule()
-            if scheduler_output:    
+            if scheduler_output.num_scheduled_tokens or scheduler_output.finished_req_ids:    
                 logger.info("starting model")
+                start_time=time.monotonic()
                 model_output = self.execute_model_with_error_logging(
                     self.model_executor.execute_model,  # type: ignore
                     scheduler_output)
-                logger.info("finished model, getting outputs")
+                end_time=time.monotonic()
+                iteration_time=end_time-start_time
+                self.iteration_time_log.append([str(scheduler_output.total_num_scheduled_tokens),str(scheduler_output.cu_mask_int),str(iteration_time)])
+                logger.info("finished model, getting outputs time %f", iteration_time)
                 engine_core_outputs = self.scheduler.prefill_update_from_output(
                     scheduler_output, model_output)  # type: ignore
-                print(engine_core_outputs)
+                #print(engine_core_outputs)
             else:
                 return {}, False
             # if os.path.exists("scheduler_output_prefill.pkl"): 
@@ -528,6 +535,16 @@ class EngineCore:
         return engine_core_outputs, model_executed
 
     def shutdown(self):
+        if self.scheduler.connector.transfer_config.kv_role == "kv_producer":
+            with open("decode_iteration.log", 'wb') as file:
+                pickle.dump(self.iteration_time_log, file)
+            #with open("decode_iteration.log", 'w') as file:
+            #    file.write("\n".join(self.iteration_time_log, file))
+        else:
+            with open("prefill_iteration.log", 'wb') as file:
+                pickle.dump(self.iteration_time_log, file)
+            #with open("prefill_iteration.log", 'w') as file:
+            #    file.write("\n".join(self.iteration_time_log, file))
         self.structured_output_manager.clear_backend()
         if self.model_executor:
             self.model_executor.shutdown()

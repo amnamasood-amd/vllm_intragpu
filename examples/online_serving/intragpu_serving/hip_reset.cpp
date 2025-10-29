@@ -7,7 +7,7 @@ int main() {
     // Your HIP operations would go here, creating streams and other resources...
 
     // Reset the current device, destroying all associated resources
-    for (int i=0; i<4; i++) {
+    for (int i=4; i<8; i++) {
         printf("device %d",i);
         err=hipSetDevice(i);
         if (err != hipSuccess) {

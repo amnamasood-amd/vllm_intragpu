@@ -592,6 +592,16 @@ class LlamaForCausalLM(nn.Module, SupportsLoRA, SupportsPP, SupportsEagle3):
                                        sampling_metadata)
         return logits
 
+    # def compute_logits_stream(
+    #     self,
+    #     hidden_states: torch.Tensor,
+    #     sampling_metadata: SamplingMetadata,
+    #     cuda_stream: Optional[torch.cuda.Stream]
+    # ) -> Optional[torch.Tensor]:
+    #     logits = self.logits_processor(self.lm_head, hidden_states,
+    #                                    sampling_metadata, cuda_stream=cuda_stream)
+    #     return logits
+
     def load_weights(self, weights: Iterable[tuple[str,
                                                    torch.Tensor]]) -> set[str]:
         loader = AutoWeightsLoader(

@@ -34,8 +34,8 @@ def add_cli_args(parser: argparse.ArgumentParser):
     )
     # Use 127.0.0.1 here instead of localhost to force the use of ipv4
     parser.add_argument("--host", type=str, default="127.0.0.1")
-    parser.add_argument("--prefill_port", type=int, default=50003)
-    parser.add_argument("--decode_port", type=int, default=50005)
+    parser.add_argument("--prefill_port", type=int, default=60003)
+    parser.add_argument("--decode_port", type=int, default=60005)
 
     parser.add_argument(
         "--endpoint",
@@ -120,7 +120,7 @@ async def main_async(args: argparse.Namespace):
         async with semaphore:
             return await request_func(request_func_input=request_func_input, session=decode_session)
 
-    test_prompts=[500*"San Francisco is a " for i in range(100)]
+    test_prompts=[500*"San Francisco is a " for i in range(1024)]
     tasks: list[asyncio.Task] = []
     tasks2: list[asyncio.Task] = []
     counter=0
@@ -157,12 +157,13 @@ async def main_async(args: argparse.Namespace):
         )
         counter+=1
         task = limited_request_func_prefill(request_func_input=prefill_test_input)
-        tasks.append(asyncio.create_task(task))
+        asyncio.create_task(task)
+        #tasks.append(asyncio.create_task(task))
         task = limited_request_func_decode(request_func_input=decode_test_input)
         tasks.append(asyncio.create_task(task))
     #await asyncio.gather(*tasks)
     outputs: list[RequestFuncOutput] = await asyncio.gather(*tasks)
-    print(outputs)
+    print([output.generated_text for output in outputs])
     
     await prefill_session.close()
     await decode_session.close()

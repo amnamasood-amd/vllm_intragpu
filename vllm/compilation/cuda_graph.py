@@ -131,7 +131,7 @@ class CUDAGraphWrapper:
                 # capturing is fast, we don't need to log it for every
                 # shape. E.g. we only log it for the first subgraph in
                 # piecewise mode.
-                logger.debug("Capturing a cudagraph on (%s,%s)",
+                logger.info("Capturing a cudagraph on (%s,%s)",
                              self.runtime_mode.name, entry.batch_descriptor)
             # validate that cudagraph capturing is legal at this point.
             validate_cudagraph_capturing_enabled()
@@ -166,7 +166,8 @@ class CUDAGraphWrapper:
                         # the output of the last graph will not be used by
                         # any other cuda graph.
                         output = weak_ref_tensors(output)
-
+            #print(output)
+            #[output_t.record_stream(forward_context.cuda_stream) for output_t in output]
             # here we always use weak ref for the output
             # to save memory
             entry.output = weak_ref_tensors(output)
