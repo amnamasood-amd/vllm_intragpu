@@ -92,7 +92,7 @@ streams=[]
 #    streams.append(torch.cuda.Stream())
     #print(streams[i].cuda_stream)
 #streams.append(torch.cuda.Stream())
-streams.append(regular_stream_nonblocking())
+#streams.append(regular_stream_nonblocking())
 #streams.append(torch.cuda.Stream())
 # for i in range(32):
 #     streams.append(regular_stream_nonblocking())

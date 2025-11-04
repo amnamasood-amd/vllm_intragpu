@@ -349,6 +349,7 @@ class GPUModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
         
         #torch.cuda.empty_cache()
         #torch.cuda._lazy_init()
+        
         self.mask_words=(self.n_cu + 31) // 32
         self.streams: list[torch.cuda.Stream] = []
         if self.kv_transfer_config.kv_role == "kv_producer":
@@ -403,15 +404,43 @@ class GPUModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
             self.record_iteration=3
         self.def_stream=torch.cuda.default_stream()
         self.prev_cu_mask_int: Optional[int] = None
-
-        self.timing_events=[]
-        for i in range(8):
-            self.timing_events.append(torch.cuda.Event(enable_timing=True))
-        self.sync_event=torch.cuda.Event()
+        
+        #self.timing_events=[]
+        #for i in range(8):
+        #    self.timing_events.append(torch.cuda.Event(enable_timing=True))
+        #self.sync_event=torch.cuda.Event()
 
         self.current_iteration=0
         
         #torch.cuda.set_sync_debug_mode("warn")
+
+        self.prefill_events=[]
+        self.prefill_event_handles=[]
+        rank = get_world_group().local_rank
+        logger.info("rank %d device %d", rank, torch.cuda.current_device())
+        if self.kv_transfer_config.kv_role == "kv_producer":
+            for i in range(4):
+                event_to_share=torch.cuda.Event(interprocess=True)
+                ipc_handle_to_share=event_to_share.ipc_handle()
+                self.prefill_events.append(event_to_share)
+                self.prefill_event_handles.append(ipc_handle_to_share)
+                
+            with open("event_handles_"+str(rank)+".pkl",'wb') as file:
+                pickle.dump(self.prefill_event_handles,file)
+        else:
+            while True:
+                if os.path.exists("event_handles_"+str(rank)+".pkl"):
+                    try:
+                        with open("event_handles_"+str(rank)+".pkl",'rb') as file:
+                            self.prefill_event_handles = pickle.load(file)
+                        logger.info("prefill_event_handles length %d", len(self.prefill_event_handles))
+                        device=torch.cuda.current_device()
+                        for handle in self.prefill_event_handles:
+                            self.prefill_events.append(torch.cuda.Event.from_ipc_handle(device,handle))
+                        break
+                    except EOFError:
+                        logger.info("cannot open kv cache handles")
+        self.prev_sync_event_counter=0
 
     def _make_buffer(self, *args, dtype: torch.dtype) -> CpuGpuBuffer:
         return CpuGpuBuffer(*args,
@@ -1545,12 +1574,53 @@ class GPUModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
             kv_connector_output=kv_connector_output,
         )
 
+    def check_prefill_status(
+        self,
+        prefill_event_counter: int,
+    ) -> bool:
+        logger.info("checking counter status %d",prefill_event_counter)
+        prefill_event_status = self.prefill_events[prefill_event_counter].query()
+        if prefill_event_status:
+            logger.info("prefill event success")
+        return prefill_event_status
+
     @torch.inference_mode()
     def execute_model(
         self,
         scheduler_output: "SchedulerOutput",
         intermediate_tensors: Optional[IntermediateTensors] = None,
     ) -> Union[ModelRunnerOutput, IntermediateTensors]:
+        #logger.info("streams[0]: %d",self.streams[0].cuda_stream)
+        #logger.info("current_stream: %d",torch.cuda.current_stream().cuda_stream)
+        # sync_event=None
+        # if scheduler_output.cu_mask_int is not None:
+        #     if scheduler_output.cu_mask_int < 5:
+        #         #cu_mask_int=min(4,scheduler_output.cu_mask_int)
+        #         current_stream=self.streams[scheduler_output.cu_mask_int]
+        #         #current_stream=self.streams[0]
+        #         #sync_event=torch.cuda.Event()
+        #     else:
+        #         scheduler_output.cu_mask_int=None
+        #         current_stream=self.streams[0]
+        #     #logger.info("cu_mask_int %d", cu_mask_int)
+        #     #current_stream=self.streams[0]
+        # else:
+        #     #logger.info("cu_mask_int is none")
+        #     current_stream=self.streams[0]
+        current_stream=self.streams[0]
+        other_event=torch.cuda.Event()
+        #with torch.cuda.stream(current_stream) as s:
+        if self.kv_transfer_config.kv_role == "kv_producer":
+            sync_event=torch.cuda.Event()
+        else:
+            #current_stream.synchronize()
+            self.def_stream.wait_event(self.prefill_events[self.prev_sync_event_counter])
+            #self.prefill_events[self.prev_sync_event_counter].synchronize()
+            sync_event=self.prefill_events[scheduler_output.prefill_event_counter]
+            self.prev_sync_event_counter=scheduler_output.prefill_event_counter
+        # self.prev_cu_mask_int=scheduler_output.cu_mask_int
+        # #torch.cuda.set_stream(self.model_stream)
+        
         self._update_states(scheduler_output)
 
         #self.current_iteration+=1
@@ -1580,27 +1650,7 @@ class GPUModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
                 "prompt tokens, tokens, please disable it when the requests "
                 "need prompt logprobs")
 
-        #logger.info("streams[0]: %d",self.streams[0].cuda_stream)
-        #logger.info("current_stream: %d",torch.cuda.current_stream().cuda_stream)
-        # sync_event=None
-        if scheduler_output.cu_mask_int is not None:
-            if scheduler_output.cu_mask_int < 5:
-                #cu_mask_int=min(4,scheduler_output.cu_mask_int)
-                current_stream=self.streams[scheduler_output.cu_mask_int]
-                #current_stream=self.streams[0]
-                #sync_event=torch.cuda.Event()
-            else:
-                scheduler_output.cu_mask_int=None
-                current_stream=self.streams[0]
-            #logger.info("cu_mask_int %d", cu_mask_int)
-            #current_stream=self.streams[0]
-        else:
-            #logger.info("cu_mask_int is none")
-            current_stream=self.streams[0]
-        #current_stream=self.streams[0]
-        sync_event=torch.cuda.Event()
-        # self.prev_cu_mask_int=scheduler_output.cu_mask_int
-        # #torch.cuda.set_stream(self.model_stream)
+        
         
         #with torch.cuda.stream(current_stream):
         # Prepare the decoder inputs.
@@ -1609,7 +1659,7 @@ class GPUModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
         max_query_len) = self._prepare_inputs(scheduler_output)
         #logger.info("Printing attn_metadata")
         #print(attn_metadata)
-    
+
         num_scheduled_tokens = scheduler_output.total_num_scheduled_tokens
         if (self.compilation_config.cudagraph_mode != CUDAGraphMode.NONE
                 and not envs.VLLM_DISABLE_PAD_FOR_CUDAGRAPH
@@ -1688,31 +1738,9 @@ class GPUModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
         cudagraph_runtime_mode, batch_descriptor = \
             self.cudagraph_dispatcher.dispatch(batch_descriptor)
 
-        # if scheduler_output.cu_mask_int is not None:
-        #     #self.model_stream=self.streams[0]
-        #     if scheduler_output.cu_mask_int == 0:
-        #         #logger.info("assigning self.model_stream")
-        #         current_stream=self.model_stream
-        #     else:
-        #         #logger.info("assigning stream with cu_mask_int %d", scheduler_output.cu_mask_int)
-        #         #cu_mask_int=(1<<32*scheduler_output.cu_mask_int)-1
-        #         cu_mask_int=(1<<256)-1
-        #         #logger.info("cu mask int %x", cu_mask_int)
-        #         cu_mask=int_to_maskarr(cu_mask_int, self.mask_words)
-        #         current_stream = stream_with_cu_mask(cu_mask)
-        # else:
-        #     #self.model_stream=self.streams[0]
-        #     #logger.info("assigning self.model_stream")
-        #     current_stream=self.model_stream
-
-        
-        
-        #current_stream=self.model_stream
-
-        #current_stream=torch.cuda.Stream()
         # Run the model.
         # Use persistent buffers for CUDA graphs.
-        #with torch.cuda.stream(current_stream):
+        other_event.record()
         
         with set_forward_context(
                     attn_metadata,
@@ -1723,8 +1751,9 @@ class GPUModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
                     batch_descriptor=batch_descriptor,
                     cuda_stream=current_stream,
         ), self.maybe_get_kv_connector_output(scheduler_output) as kv_connector_output:
-            with torch.cuda.stream(current_stream) as s:
+            with torch.cuda.stream(current_stream):
                 #self.timing_events[0].record(stream=s)
+                current_stream.wait_event(other_event)
                 model_output = self.model(
                     input_ids=input_ids,
                     positions=positions,
@@ -1732,14 +1761,16 @@ class GPUModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
                     inputs_embeds=inputs_embeds,
                     **model_kwargs,
                 )
-        #current_stream.synchronize()
-                #if self.kv_transfer_config.kv_role == "kv_producer":
-                sync_event.record(stream=s)
+                sync_event.record()
            
         # #torch.cuda.current_stream().wait_event(self.sync_event)
         #self.def_stream.wait_event(sync_event)
         if self.kv_transfer_config.kv_role == "kv_producer":
+            # prefill_event_status = self.prefill_events[scheduler_output.prefill_event_counter].query()
+            # if prefill_event_status:
+            #     logger.info("prefill event success")
             self.def_stream.wait_event(sync_event)
+            
             hidden_states = model_output
             aux_hidden_states = None
 
@@ -1892,12 +1923,13 @@ class GPUModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
             # #     num_nans_in_logits = self._get_nans_in_logits(logits)
             # discard_sampled_tokens_req_indices = []
             #self.def_stream.wait_event(sync_event)
-            current_stream.synchronize()
+            #current_stream.synchronize()
             
             valid_sampled_token_ids=[]
             logprobs_lists=[]
             prompt_logprobs_dict={}
             num_nans_in_logits=[]
+            prefill_event_status=False
         
         #current_stream.synchronize()
         #         self.sync_event.record(stream=s)
@@ -2075,6 +2107,7 @@ class GPUModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
             pooler_output=[],
             kv_connector_output=kv_connector_output,
             num_nans_in_logits=num_nans_in_logits,
+            #current_event_status=prefill_event_status,
         )
 
 

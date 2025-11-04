@@ -393,6 +393,8 @@ class EngineCore:
         if self.scheduler.connector.transfer_config.kv_role == "kv_producer":
             #if not self.scheduler.has_requests():
             #    return {}, False
+            if self.scheduler.pending_prefill_requests:
+                    self.scheduler.current_prefill_event_status = self.model_executor.check_prefill_status(self.scheduler.current_prefill_event_counter)
             scheduler_output = self.scheduler.schedule()
             if scheduler_output:
                 #logger.info("in core calling execute model and checking connector")

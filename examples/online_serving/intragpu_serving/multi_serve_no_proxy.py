@@ -120,7 +120,7 @@ async def main_async(args: argparse.Namespace):
         async with semaphore:
             return await request_func(request_func_input=request_func_input, session=decode_session)
 
-    test_prompts=[500*"San Francisco is a " for i in range(1024)]
+    test_prompts=[500*"San Francisco is a " for i in range(100)]
     tasks: list[asyncio.Task] = []
     tasks2: list[asyncio.Task] = []
     counter=0
@@ -164,7 +164,7 @@ async def main_async(args: argparse.Namespace):
     #await asyncio.gather(*tasks)
     outputs: list[RequestFuncOutput] = await asyncio.gather(*tasks)
     print([output.generated_text for output in outputs])
-    
+    #print([(output.)])
     await prefill_session.close()
     await decode_session.close()
 

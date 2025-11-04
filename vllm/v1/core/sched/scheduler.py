@@ -126,7 +126,8 @@ class Scheduler(SchedulerInterface):
         self.finished_req_ids: set[str] = set()
         
         self.running_prefill: list[Request] = []
-        self.finished_req_ids_prefill: list[str] = []
+        self.finished_req_ids_prefill: list[list[str]] = [[] for i in range(4) ]
+
 
         # KV Connector: requests in process of async KV loading or recving
         self.finished_recving_kv_req_ids: set[str] = set()
@@ -180,6 +181,10 @@ class Scheduler(SchedulerInterface):
             self.prev_prefill_counter=0
         else:
             self.prev_prefill_counter=-1
+
+        self.current_prefill_event_counter=0
+        self.current_prefill_event_status=False
+        self.pending_prefill_requests=[]
 
     def prefill_schedule(self) -> SchedulerOutput:   
         #logger.info("Prefill Scheduling")
@@ -250,6 +255,7 @@ class Scheduler(SchedulerInterface):
                 
                 request = self.waiting.peek_request()
                 
+                
 
                 num_external_computed_tokens = 0
                 load_kv_async = False
@@ -278,6 +284,8 @@ class Scheduler(SchedulerInterface):
                         self.scheduler_config.long_prefill_token_threshold)
                 
                 num_new_tokens = min(num_new_tokens, token_budget)
+                #if num_new_tokens>token_budget:
+                #    continue
                 assert num_new_tokens > 0
 
                 # Handles an edge case when P/D Disaggregation
@@ -415,6 +423,7 @@ class Scheduler(SchedulerInterface):
                 structured_output_request_ids=structured_output_request_ids,
                 grammar_bitmask=grammar_bitmask,
                 cu_mask_int=cu_mask_int,
+                prefill_event_counter=self.current_prefill_event_counter,
         )
             #print(scheduler_output)
         #else:
@@ -468,23 +477,37 @@ class Scheduler(SchedulerInterface):
         scheduled_resumed_reqs_prefill: list[Request] = []
         num_scheduled_tokens_prefill: dict[str, int] = {}
 
-        just_finished = [] #self.connector.gpu_manager.get_list().copy()
+        #check the current_prefill_event status
+        prev_event_counter=self.current_prefill_event_counter
+        just_finished=[]
+        if self.current_prefill_event_status is True:
+           logger.info("event status is success, incrementing counter")
+           just_finished=self.pending_prefill_requests.copy()
+           self.current_prefill_event_counter=(self.current_prefill_event_counter+1)%4
+           self.current_prefill_event_status=False
+           self.prev_prefill_counter+=1
+           #self.pending_prefill_requests=[]
+
+        pending_prefill_temp = [[] for i in range(4)] #self.connector.gpu_manager.get_list().copy()
+
         if os.path.exists("just_finished_prefill.pkl"):
             try:
                 with open("just_finished_prefill.pkl",'rb') as file:
-                    just_finished=pickle.load(file)
+                    pending_prefill_temp=pickle.load(file)
             except EOFError:
                 logger.info("EOFError loading finished_prefill ids")
-                just_finished=self.finished_req_ids_prefill.copy()
+                pending_prefill_temp=self.finished_req_ids_prefill.copy()
         #logger.info("finished req ids from prefill")
         #print(just_finished)
-        just_finished = list(set(just_finished)-set(self.finished_req_ids_prefill))
-        if just_finished:
-            self.prev_prefill_counter+=1
-        logger.info("just finished_req_ids_prefill")
+        self.pending_prefill_requests = list(set(pending_prefill_temp[self.current_prefill_event_counter])-set(self.finished_req_ids_prefill[self.current_prefill_event_counter]))
+        #if self.pending_prefill_requests:
+        #    self.prev_prefill_counter+=1
+        logger.info("just finished_req_ids_prefill for event %d", prev_event_counter)
         print(just_finished) #add to new running scheduled requests
+        logger.info("pending_prefill requests for event %d", self.current_prefill_event_counter)
+        print(self.pending_prefill_requests)
         #print("token_budget ", token_budget)
-
+        
         # For logging.
         scheduled_timestamp = time.monotonic()
         logger.info("already running requests %d", len(self.running))
@@ -506,7 +529,7 @@ class Scheduler(SchedulerInterface):
                 finished_prefill=True
                 self.running_prefill.remove(request)
                 #print(type(self.finished_req_ids_prefill))
-                self.finished_req_ids_prefill.append(request.request_id)
+                self.finished_req_ids_prefill[prev_event_counter].append(request.request_id)
             
             
             num_new_tokens = (request.num_tokens_with_spec +
@@ -895,6 +918,7 @@ class Scheduler(SchedulerInterface):
                 structured_output_request_ids=structured_output_request_ids,
                 grammar_bitmask=grammar_bitmask,
                 cu_mask_int=cu_mask_int,
+                prefill_event_counter=self.current_prefill_event_counter,
             )
             #print(scheduler_output)
         else:
@@ -1187,7 +1211,7 @@ class Scheduler(SchedulerInterface):
                 request_id = request.request_id
                 logger.info("Just finished request %s with num_prompt_tokens %d and num_tokens %d", request.request_id, request.num_prompt_tokens, request.num_tokens)
                 self.finished_req_ids.add(request_id)
-                self.finished_req_ids_prefill.append(request_id)
+                self.finished_req_ids_prefill[self.current_prefill_event_counter].append(request_id)
                 
                 
 
@@ -1225,6 +1249,8 @@ class Scheduler(SchedulerInterface):
             with open("just_finished_prefill.pkl",'wb') as file:
                 pickle.dump(self.finished_req_ids_prefill,file)
             #self.connector.gpu_manager.set_list(self.finished_req_ids)
+            self.current_prefill_event_counter=(self.current_prefill_event_counter+1)%4
+
         return engine_core_outputs
 
     def handle_finished_requests(self):
@@ -1249,6 +1275,9 @@ class Scheduler(SchedulerInterface):
         scheduler_output: SchedulerOutput,
         model_runner_output: ModelRunnerOutput,
     ) -> dict[int, EngineCoreOutputs]:
+        #first update the prefill event status from modelrunneroutput
+        #self.current_prefill_event_status=model_runner_output.current_event_status
+        
         sampled_token_ids = model_runner_output.sampled_token_ids
         logprobs = model_runner_output.logprobs
         prompt_logprobs_dict = model_runner_output.prompt_logprobs_dict

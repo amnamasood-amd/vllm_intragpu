@@ -172,8 +172,11 @@ class SchedulerOutput:
     grammar_bitmask: Optional[npt.NDArray[np.int32]]
 
     cu_mask_int: Optional[int]
+    prefill_event_counter:int
     # KV Cache Connector metadata.
     kv_connector_metadata: Optional[KVConnectorMetadata] = None
+
+    
 
     @classmethod
     def from_scheduleroutputprefill (
@@ -195,6 +198,7 @@ class SchedulerOutput:
             grammar_bitmask=None,
             kv_connector_metadata=None,
             cu_mask_int=None,
+            prefill_event_counter=0,
         )
 
 

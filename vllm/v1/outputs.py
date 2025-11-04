@@ -113,6 +113,8 @@ class ModelRunnerOutput:
     # req_id -> num_nans_in_logits
     num_nans_in_logits: Optional[dict[str, int]] = None
 
+    #current_event_status: bool = False
+
 
 @dataclass
 class DraftTokenIds:
