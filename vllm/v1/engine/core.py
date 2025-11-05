@@ -54,6 +54,7 @@ from vllm.version import __version__ as VLLM_VERSION
 from queue import Empty
 import time
 import pickle
+from vllm.v1.outputs import EMPTY_MODEL_RUNNER_OUTPUT
 
 logger = init_logger(__name__)
 
@@ -393,8 +394,6 @@ class EngineCore:
         if self.scheduler.connector.transfer_config.kv_role == "kv_producer":
             #if not self.scheduler.has_requests():
             #    return {}, False
-            if self.scheduler.pending_prefill_requests:
-                    self.scheduler.current_prefill_event_status = self.model_executor.check_prefill_status(self.scheduler.current_prefill_event_counter)
             scheduler_output = self.scheduler.schedule()
             if scheduler_output:
                 #logger.info("in core calling execute model and checking connector")
@@ -418,8 +417,12 @@ class EngineCore:
                 return self.scheduler.handle_finished_requests(), False
         else:
             #return {}, True
+            if self.scheduler.pending_prefill_requests and self.scheduler.current_prefill_event_counter<len(self.scheduler.pending_prefill_requests):
+                logger.info("checking status of prefill counter %d", self.scheduler.current_prefill_event_counter)
+                current_prefill_event_status = self.model_executor.check_prefill_status()
+                self.scheduler.update_after_prefill_status(current_prefill_event_status)
             scheduler_output = self.scheduler.prefill_schedule()
-            if scheduler_output.num_scheduled_tokens or scheduler_output.finished_req_ids:    
+            if scheduler_output.num_scheduled_tokens:    
                 logger.info("starting model")
                 start_time=time.monotonic()
                 model_output = self.execute_model_with_error_logging(
@@ -432,6 +435,9 @@ class EngineCore:
                 engine_core_outputs = self.scheduler.prefill_update_from_output(
                     scheduler_output, model_output)  # type: ignore
                 #print(engine_core_outputs)
+            elif scheduler_output.finished_req_ids:
+                engine_core_outputs = self.scheduler.prefill_update_from_output(
+                    scheduler_output, EMPTY_MODEL_RUNNER_OUTPUT)
             else:
                 return {}, False
             # if os.path.exists("scheduler_output_prefill.pkl"): 

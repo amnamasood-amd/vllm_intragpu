@@ -392,8 +392,8 @@ class Worker(WorkerBase):
         output.kv_connector_output = kv_connector_output
         return output
 
-    def check_prefill_status(self, prefill_event_counter) -> bool:
-        return self.model_runner.check_prefill_status(prefill_event_counter)
+    def check_prefill_status(self) -> bool:
+        return self.model_runner.check_prefill_status()
 
     def take_draft_token_ids(self) -> Optional[DraftTokenIds]:
         return self.model_runner.take_draft_token_ids()

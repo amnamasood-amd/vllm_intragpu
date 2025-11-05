@@ -123,10 +123,13 @@ class SchedulerInterface(ABC):
         """
         raise NotImplementedError
 
+    def has_pending_prefill_requests(self) -> bool:
+        raise NotImplementedError
+
     def has_requests(self) -> bool:
         """Returns True if there are unfinished requests, or finished requests
         not yet returned in SchedulerOutputs."""
-        return self.has_unfinished_requests() or self.has_finished_requests()
+        return self.has_unfinished_requests() or self.has_finished_requests() or self.has_pending_prefill_requests()
 
     @abstractmethod
     def reset_prefix_cache(self) -> bool:

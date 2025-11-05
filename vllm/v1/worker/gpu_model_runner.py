@@ -371,10 +371,10 @@ class GPUModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
             # cu_mask_int=(1<<256)-1
             # cu_mask=int_to_maskarr(cu_mask_int, self.mask_words)
             # self.streams.append(stream_with_cu_mask(cu_mask))
-            for i in range(1,5):
-                cu_mask_int=(1<<(64*i+128))-1
-                cu_mask=int_to_maskarr(cu_mask_int, self.mask_words)
-                self.streams.append(stream_with_cu_mask(cu_mask)) #TODO complementary mask for prefill
+            # for i in range(1,5):
+            #     cu_mask_int=(1<<(64*i))-1
+            #     cu_mask=int_to_maskarr(cu_mask_int, self.mask_words)
+            #     self.streams.append(stream_with_cu_mask(cu_mask)) #TODO complementary mask for prefill
             #self.streams.append(priority_stream_nonblocking())
                 #self.streams.append(torch.cuda.Stream())
             self.record_iteration=512
@@ -394,12 +394,12 @@ class GPUModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
             # cu_mask_int=(1<<320)-1
             # cu_mask=int_to_maskarr(cu_mask_int, self.mask_words)
             # self.streams.append(stream_with_cu_mask(cu_mask))
-            for i in range(1,5):
-                decode_mask_int=(1<<64*i)-1
-                cu_mask_int=((1 << self.n_cu) - 1) ^ decode_mask_int
-                cu_mask=int_to_maskarr(cu_mask_int, self.mask_words)
-                self.streams.append(stream_with_cu_mask(cu_mask)) #TODO complementary mask for prefill
-                #self.streams.append(regular_stream())
+            # for i in range(1,5):
+            #     decode_mask_int=(1<<64*i)-1
+            #     cu_mask_int=((1 << self.n_cu) - 1) ^ decode_mask_int
+            #     cu_mask=int_to_maskarr(cu_mask_int, self.mask_words)
+            #     self.streams.append(stream_with_cu_mask(cu_mask)) #TODO complementary mask for prefill
+            #     #self.streams.append(regular_stream())
             #self.streams.append(priority_stream_nonblocking())
             self.record_iteration=3
         self.def_stream=torch.cuda.default_stream()
@@ -413,34 +413,34 @@ class GPUModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
         self.current_iteration=0
         
         #torch.cuda.set_sync_debug_mode("warn")
-
+        self.current_prefill_event_counter=0
         self.prefill_events=[]
-        self.prefill_event_handles=[]
-        rank = get_world_group().local_rank
-        logger.info("rank %d device %d", rank, torch.cuda.current_device())
-        if self.kv_transfer_config.kv_role == "kv_producer":
-            for i in range(4):
-                event_to_share=torch.cuda.Event(interprocess=True)
-                ipc_handle_to_share=event_to_share.ipc_handle()
-                self.prefill_events.append(event_to_share)
-                self.prefill_event_handles.append(ipc_handle_to_share)
+        # self.prefill_event_handles=[]
+        # rank = get_world_group().local_rank
+        # logger.info("rank %d device %d", rank, torch.cuda.current_device())
+        # if self.kv_transfer_config.kv_role == "kv_producer":
+        #     for i in range(4):
+        #         event_to_share=torch.cuda.Event(interprocess=True)
+        #         ipc_handle_to_share=event_to_share.ipc_handle()
+        #         self.prefill_events.append(event_to_share)
+        #         self.prefill_event_handles.append(ipc_handle_to_share)
                 
-            with open("event_handles_"+str(rank)+".pkl",'wb') as file:
-                pickle.dump(self.prefill_event_handles,file)
-        else:
-            while True:
-                if os.path.exists("event_handles_"+str(rank)+".pkl"):
-                    try:
-                        with open("event_handles_"+str(rank)+".pkl",'rb') as file:
-                            self.prefill_event_handles = pickle.load(file)
-                        logger.info("prefill_event_handles length %d", len(self.prefill_event_handles))
-                        device=torch.cuda.current_device()
-                        for handle in self.prefill_event_handles:
-                            self.prefill_events.append(torch.cuda.Event.from_ipc_handle(device,handle))
-                        break
-                    except EOFError:
-                        logger.info("cannot open kv cache handles")
-        self.prev_sync_event_counter=0
+        #     with open("event_handles_"+str(rank)+".pkl",'wb') as file:
+        #         pickle.dump(self.prefill_event_handles,file)
+        # else:
+        #     while True:
+        #         if os.path.exists("event_handles_"+str(rank)+".pkl"):
+        #             try:
+        #                 with open("event_handles_"+str(rank)+".pkl",'rb') as file:
+        #                     self.prefill_event_handles = pickle.load(file)
+        #                 logger.info("prefill_event_handles length %d", len(self.prefill_event_handles))
+        #                 device=torch.cuda.current_device()
+        #                 for handle in self.prefill_event_handles:
+        #                     self.prefill_events.append(torch.cuda.Event.from_ipc_handle(device,handle))
+        #                 break
+        #             except EOFError:
+        #                 logger.info("cannot open kv cache handles")
+        # self.prev_sync_event_counter=0
 
     def _make_buffer(self, *args, dtype: torch.dtype) -> CpuGpuBuffer:
         return CpuGpuBuffer(*args,
@@ -1576,12 +1576,12 @@ class GPUModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
 
     def check_prefill_status(
         self,
-        prefill_event_counter: int,
     ) -> bool:
-        logger.info("checking counter status %d",prefill_event_counter)
-        prefill_event_status = self.prefill_events[prefill_event_counter].query()
-        if prefill_event_status:
+        logger.info("checking counter status %d",self.current_prefill_event_counter)
+        prefill_event_status = self.prefill_events[self.current_prefill_event_counter].query()
+        if prefill_event_status is True:
             logger.info("prefill event success")
+            self.current_prefill_event_counter+=1
         return prefill_event_status
 
     @torch.inference_mode()
@@ -1609,15 +1609,25 @@ class GPUModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
         #     current_stream=self.streams[0]
         current_stream=self.streams[0]
         other_event=torch.cuda.Event()
-        #with torch.cuda.stream(current_stream) as s:
+
         if self.kv_transfer_config.kv_role == "kv_producer":
             sync_event=torch.cuda.Event()
         else:
-            #current_stream.synchronize()
-            self.def_stream.wait_event(self.prefill_events[self.prev_sync_event_counter])
-            #self.prefill_events[self.prev_sync_event_counter].synchronize()
-            sync_event=self.prefill_events[scheduler_output.prefill_event_counter]
-            self.prev_sync_event_counter=scheduler_output.prefill_event_counter
+            if self.prefill_events:
+                self.def_stream.wait_event(self.prefill_events[-1])
+            sync_event=torch.cuda.Event()
+            self.prefill_events.append(sync_event)
+        
+
+        #with torch.cuda.stream(current_stream) as s:
+        # if self.kv_transfer_config.kv_role == "kv_producer":
+        #     sync_event=torch.cuda.Event()
+        # else:
+        #     #current_stream.synchronize()
+        #     self.def_stream.wait_event(self.prefill_events[self.prev_sync_event_counter])
+        #     #self.prefill_events[self.prev_sync_event_counter].synchronize()
+        #     sync_event=self.prefill_events[scheduler_output.prefill_event_counter]
+        #     self.prev_sync_event_counter=scheduler_output.prefill_event_counter
         # self.prev_cu_mask_int=scheduler_output.cu_mask_int
         # #torch.cuda.set_stream(self.model_stream)
         
@@ -2107,7 +2117,7 @@ class GPUModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
             pooler_output=[],
             kv_connector_output=kv_connector_output,
             num_nans_in_logits=num_nans_in_logits,
-            #current_event_status=prefill_event_status,
+            #current_event=self.sync_event,
         )
 
 

@@ -194,9 +194,9 @@ class MultiprocExecutor(Executor):
                 outputs, self.output_rank)
         return self.kv_output_aggregator.aggregate(outputs, self.output_rank)
 
-    def check_prefill_status(self, prefill_event_counter) -> bool:
-        prefill_event_status = self.collective_rpc("check_prefill_status",
-                            args=(prefill_event_counter, ),)
+    def check_prefill_status(self) -> bool:
+        prefill_event_status = self.collective_rpc("check_prefill_status",)
+                            #args=(prefill_event, ),)
                             #unique_reply_rank=self.output_rank)
         print("prefill event status",prefill_event_status) 
         return prefill_event_status[0]                   
