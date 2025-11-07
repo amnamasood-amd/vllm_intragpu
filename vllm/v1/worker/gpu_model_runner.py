@@ -104,7 +104,7 @@ from vllm.distributed.parallel_state import get_world_group
 import os
 from torch.profiler import profile, ProfilerActivity, record_function
 
-
+import threading
 
 logger = init_logger(__name__)
 
@@ -349,7 +349,7 @@ class GPUModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
         
         #torch.cuda.empty_cache()
         #torch.cuda._lazy_init()
-        
+        self.rank = get_world_group().local_rank
         self.mask_words=(self.n_cu + 31) // 32
         self.streams: list[torch.cuda.Stream] = []
         if self.kv_transfer_config.kv_role == "kv_producer":
@@ -401,6 +401,11 @@ class GPUModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
             #     self.streams.append(stream_with_cu_mask(cu_mask)) #TODO complementary mask for prefill
             #     #self.streams.append(regular_stream())
             #self.streams.append(priority_stream_nonblocking())
+            self.current_prefill_status_counter=0
+            if self.rank==0:
+                prefill_status_thread = threading.Thread(target=self.check_prefill_status,daemon=True)
+                prefill_status_thread.start()
+            
             self.record_iteration=3
         self.def_stream=torch.cuda.default_stream()
         self.prev_cu_mask_int: Optional[int] = None
@@ -414,9 +419,10 @@ class GPUModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
         
         #torch.cuda.set_sync_debug_mode("warn")
         self.current_prefill_event_counter=0
-        self.prefill_events=[]
+        self.prefill_events: list[torch.cuda.Event]=[]
+        self.prefill_event_statuses: list[bool]=[]
         # self.prefill_event_handles=[]
-        # rank = get_world_group().local_rank
+        
         # logger.info("rank %d device %d", rank, torch.cuda.current_device())
         # if self.kv_transfer_config.kv_role == "kv_producer":
         #     for i in range(4):
@@ -1576,13 +1582,21 @@ class GPUModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
 
     def check_prefill_status(
         self,
-    ) -> bool:
-        logger.info("checking counter status %d",self.current_prefill_event_counter)
-        prefill_event_status = self.prefill_events[self.current_prefill_event_counter].query()
-        if prefill_event_status is True:
-            logger.info("prefill event success")
-            self.current_prefill_event_counter+=1
-        return prefill_event_status
+    ):
+        logger.info("starting check_prefill_status")
+        while True:
+            if self.current_prefill_status_counter < len(self.prefill_events):
+                #logger.info("checking counter status %d",self.current_prefill_status_counter)
+                prefill_event_status = self.prefill_events[self.current_prefill_status_counter].query()
+                if prefill_event_status is True:
+                    #logger.info("prefill event success")
+                    self.prefill_event_statuses.append(prefill_event_status)
+                    self.current_prefill_event_counter+=1
+                    with open("event_statuses_"+str(self.rank)+".pkl",'wb') as file:
+                        pickle.dump(self.prefill_event_statuses,file)
+                    self.current_prefill_status_counter+=1
+            time.sleep(0.1)
+        #return prefill_event_status
 
     @torch.inference_mode()
     def execute_model(
@@ -1616,7 +1630,7 @@ class GPUModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
             if self.prefill_events:
                 self.def_stream.wait_event(self.prefill_events[-1])
             sync_event=torch.cuda.Event()
-            self.prefill_events.append(sync_event)
+            #self.prefill_events.append(sync_event)
         
 
         #with torch.cuda.stream(current_stream) as s:
@@ -1934,7 +1948,7 @@ class GPUModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
             # discard_sampled_tokens_req_indices = []
             #self.def_stream.wait_event(sync_event)
             #current_stream.synchronize()
-            
+            self.prefill_events.append(sync_event)
             valid_sampled_token_ids=[]
             logprobs_lists=[]
             prompt_logprobs_dict={}

@@ -198,7 +198,7 @@ class MultiprocExecutor(Executor):
         prefill_event_status = self.collective_rpc("check_prefill_status",)
                             #args=(prefill_event, ),)
                             #unique_reply_rank=self.output_rank)
-        print("prefill event status",prefill_event_status) 
+        #print("prefill event status",prefill_event_status) 
         return prefill_event_status[0]                   
 
     

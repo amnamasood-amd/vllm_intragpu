@@ -125,8 +125,7 @@ class Scheduler(SchedulerInterface):
         # This is flushed at the end of each scheduling step.
         self.finished_req_ids: set[str] = set()
         
-        self.running_prefill: list[Request] = []
-        self.finished_req_ids_prefill: list[str]= []
+        
 
 
         # KV Connector: requests in process of async KV loading or recving
@@ -184,7 +183,11 @@ class Scheduler(SchedulerInterface):
 
         self.current_prefill_event_counter=0
         #self.current_prefill_event_status=False
-        self.pending_prefill_requests: list[list[str]]=[]
+        self.pending_prefill_requests: list[list[(int,str)]]=[] #pending request ids with their associated event ids
+
+        self.running_prefill: list[Request] = []
+        self.finished_req_ids_prefill: list[(int,str)]= []
+        self.prefill_event_statuses: list[bool] = []
         #self.current_scheduled_requests: list[str]=[]
         #self.current_prefill_event=None
 
@@ -482,6 +485,15 @@ class Scheduler(SchedulerInterface):
         scheduled_resumed_reqs_prefill: list[Request] = []
         num_scheduled_tokens_prefill: dict[str, int] = {}
 
+        if os.path.exists("event_statuses_0.pkl"):
+            try:
+                with open("event_statuses_0.pkl",'rb') as file:
+                    self.prefill_event_statuses = pickle.load(file)
+                    #logger.info("prefill_event_statuses")
+                    #print(self.scheduler.prefill_event_statuses)
+            except EOFError:
+                logger.info("cannot open prefill event status file")
+
         just_finished = []
         if os.path.exists("just_finished_prefill.pkl"):
             try:
@@ -495,11 +507,14 @@ class Scheduler(SchedulerInterface):
         just_finished = list(set(just_finished)-set(self.finished_req_ids_prefill))
         if just_finished:
             self.prev_prefill_counter+=1
-        logger.info("finished_req_ids_prefill")
-        print(self.finished_req_ids_prefill)
-        logger.info("just_finished")
-        print(just_finished) #add to new running scheduled requests
+        # logger.info("finished_req_ids_prefill")
+        # print(self.finished_req_ids_prefill)
+        # logger.info("just_finished")
+        # print(just_finished) #add to new running scheduled requests
         #print("token_budget ", token_budget)
+        just_finished_req_ids=[item[1] for item in just_finished]
+        # logger.info("prefill_event_statuses")
+        # print(self.prefill_event_statuses)
         
         # For logging.
         scheduled_timestamp = time.monotonic()
@@ -514,15 +529,24 @@ class Scheduler(SchedulerInterface):
             request = self.running[req_index]
             finished_prefill = False
 
-            if request.request_id in just_finished:
-                #update request num computed tokens
-                logger.info("Prefill request %s finished with num_output_placeholders %d", request.request_id, request.num_output_placeholders)
-                request.num_computed_tokens = request.num_prompt_tokens - 1
-                #request.num_output_placeholders += 1
-                finished_prefill=True
-                self.running_prefill.remove(request)
-                #print(type(self.finished_req_ids_prefill))
-                self.finished_req_ids_prefill.append(request.request_id)
+            #if request.request_id in just_finished_req_ids :
+            try:
+                index_req_id= just_finished_req_ids.index(request.request_id)
+                logger.info("index of req_id %s is %d", request.request_id, index_req_id)
+                assert just_finished[index_req_id][1] == request.request_id
+                event = just_finished[index_req_id][0]
+                if event<len(self.prefill_event_statuses) and self.prefill_event_statuses[event] is True:
+                    #update request num computed tokens
+                    logger.info("Prefill request %s finished with num_output_placeholders %d", request.request_id, request.num_output_placeholders)
+                    request.num_computed_tokens = request.num_prompt_tokens - 1
+                    #request.num_output_placeholders += 1
+                    finished_prefill=True
+                    self.running_prefill.remove(request)
+                    #print(type(self.finished_req_ids_prefill))
+                    self.finished_req_ids_prefill.append((event,request.request_id))
+            except ValueError:
+                pass
+                #logger.info("request_id %s not in just_finished", request.request_id)
             
             
             num_new_tokens = (request.num_tokens_with_spec +
@@ -1172,7 +1196,7 @@ class Scheduler(SchedulerInterface):
         stopped_running_reqs: set[Request] = set()
         logprobs = model_runner_output.logprobs
         prompt_logprobs_dict = model_runner_output.prompt_logprobs_dict
-        stopped_requests: list[str] = []
+        stopped_requests: list[(int,str)] = []
         #assuming that only scheduled requests are here and no support for preemption
         for req_id, num_tokens_scheduled in num_scheduled_tokens.items():
             assert num_tokens_scheduled > 0
@@ -1205,7 +1229,7 @@ class Scheduler(SchedulerInterface):
                 request_id = request.request_id
                 logger.info("Just finished request %s with num_prompt_tokens %d and num_tokens %d", request.request_id, request.num_prompt_tokens, request.num_tokens)
                 self.finished_req_ids.add(request_id)
-                stopped_requests.append(request_id)   
+                stopped_requests.append((self.current_prefill_event_counter,request_id))   
 
             prompt_logprobs_tensors = prompt_logprobs_dict.get(req_id)   
             if new_token_ids:
@@ -1228,9 +1252,17 @@ class Scheduler(SchedulerInterface):
         self.running = remove_all(self.running, stopped_running_reqs)
 
         if stopped_requests:
-            self.pending_prefill_requests.append(stopped_requests)
-            logger.info("pending_prefill_requests")
-            print(self.pending_prefill_requests) 
+            # self.pending_prefill_requests.append(stopped_requests)
+            # logger.info("pending_prefill_requests")
+            # print(self.pending_prefill_requests) 
+            self.current_prefill_event_counter+=1
+            self.finished_req_ids_prefill+=stopped_requests
+            logger.info("finished_req_ids_prefill")
+            print(self.finished_req_ids_prefill)
+            with open("just_finished_prefill.pkl",'wb') as file:
+                pickle.dump(self.finished_req_ids_prefill,file)
+
+
         #print(self.waiting)
         #print(self.running)
         #print(outputs)
@@ -1353,6 +1385,8 @@ class Scheduler(SchedulerInterface):
                     stopped_running_reqs.add(request)
                 else:
                     stopped_preempted_reqs.add(request)
+                #logger.info("output tokens for request %s, req_id")
+                #print(request._output_token_ids)
 
             # Extract sample logprobs if needed.
             if request.sampling_params is not None \

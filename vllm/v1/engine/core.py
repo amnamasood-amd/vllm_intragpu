@@ -95,23 +95,6 @@ class EngineCore:
         num_gpu_blocks, num_cpu_blocks, kv_cache_config = \
             self._initialize_kv_caches(vllm_config)
 
-        # if vllm_config.kv_transfer_config.kv_role=="kv_producer":
-        #     with open("num_gpu_blocks.pkl",'wb') as file:
-        #         pickle.dump([num_gpu_blocks], file)
-        # else:
-        #     while True:
-        #         if os.path.exists("num_gpu_blocks.pkl"):
-        #             try:
-        #                 with open("num_gpu_blocks.pkl",'rb') as file:
-        #                     num_gpu_blocks=pickle.load(file)
-        #                 num_gpu_blocks=int(num_gpu_blocks[0])
-        #                 #num_gpu_blocks=blocks[0]
-        #                 #num_cpu_blocks=blocks[1]
-        #                 break
-        #             except EOFError:
-        #                 logger.info("cannot open num_gpu_blocks.pkl")
-        #         time.sleep(0.0001)
-
         vllm_config.cache_config.num_gpu_blocks = num_gpu_blocks
         vllm_config.cache_config.num_cpu_blocks = num_cpu_blocks
         logger.info("num_gpu_blocks %d num_cpu_blocks %d", num_gpu_blocks,num_cpu_blocks)
@@ -156,6 +139,12 @@ class EngineCore:
         #if self.scheduler.connector is not None: # and self.scheduler.connector.transfer_config.kv_role=="kv_consumer":
         block_allocation_thread = threading.Thread(target=self.check_for_allocation, daemon=True)
         block_allocation_thread.start()
+        # if self.scheduler.connector.transfer_config.kv_role=="kv_consumer":
+        #     prefill_status_thread=threading.Thread(target=self.check_prefill, daemon=True)
+        #     prefill_status_thread.start()
+        # if self.scheduler.connector.transfer_config.kv_role=="kv_producer":
+        #     prefill_status_thread=threading.Thread(target=self.check_prefill_decode, daemon=True)
+        #     prefill_status_thread.start()
 
         self.use_spec_decode = vllm_config.speculative_config is not None
 
@@ -335,7 +324,25 @@ class EngineCore:
                 #print(self.scheduler.pending_allocation_req_ids)
                 time.sleep(0.0001)
 
+    def check_prefill(self):
+        while True:
+            if self.scheduler.pending_prefill_requests and self.scheduler.current_prefill_event_counter<len(self.scheduler.pending_prefill_requests):
+                logger.info("checking status of prefill counter %d", self.scheduler.current_prefill_event_counter)
+                current_prefill_event_status = self.model_executor.check_prefill_status()
+                self.scheduler.update_after_prefill_status(current_prefill_event_status)
+            time.sleep(0.0001)
 
+    def check_prefill_decode(self):
+        while True:
+            if os.path.exists("event_statuses_0.pkl"):
+                try:
+                    with open("event_statuses_0.pkl",'rb') as file:
+                        self.scheduler.prefill_event_statuses = pickle.load(file)
+                        #logger.info("prefill_event_statuses")
+                        #print(self.scheduler.prefill_event_statuses)
+                except EOFError:
+                    logger.info("cannot open prefill event status file")
+            time.sleep(0.01)
 
 
     def abort_requests(self, request_ids: list[str]):
@@ -376,15 +383,6 @@ class EngineCore:
         """
         if not self.scheduler.has_requests():
             return {}, False
-        # scheduler_output = self.scheduler.schedule()
-        # #logger.info("in core calling execute model and checking connector")
-        # #self.scheduler.connector.qmgr.q.put(scheduler_output) #temporary test. this has to shift to scheduler
-        # #print(scheduler_output.kv_connector_metadata)
-        # model_output = self.execute_model_with_error_logging(
-        #     self.model_executor.execute_model,  # type: ignore
-        #     scheduler_output)
-        # engine_core_outputs = self.scheduler.update_from_output(
-        #     scheduler_output, model_output)
         
 
         #Check for any requests remaining in the scheduler - unfinished,
@@ -417,10 +415,10 @@ class EngineCore:
                 return self.scheduler.handle_finished_requests(), False
         else:
             #return {}, True
-            if self.scheduler.pending_prefill_requests and self.scheduler.current_prefill_event_counter<len(self.scheduler.pending_prefill_requests):
-                logger.info("checking status of prefill counter %d", self.scheduler.current_prefill_event_counter)
-                current_prefill_event_status = self.model_executor.check_prefill_status()
-                self.scheduler.update_after_prefill_status(current_prefill_event_status)
+            # if self.scheduler.pending_prefill_requests and self.scheduler.current_prefill_event_counter<len(self.scheduler.pending_prefill_requests):
+            #     logger.info("checking status of prefill counter %d", self.scheduler.current_prefill_event_counter)
+            #     current_prefill_event_status = self.model_executor.check_prefill_status()
+            #     self.scheduler.update_after_prefill_status(current_prefill_event_status)
             scheduler_output = self.scheduler.prefill_schedule()
             if scheduler_output.num_scheduled_tokens:    
                 logger.info("starting model")
@@ -440,46 +438,7 @@ class EngineCore:
                     scheduler_output, EMPTY_MODEL_RUNNER_OUTPUT)
             else:
                 return {}, False
-            # if os.path.exists("scheduler_output_prefill.pkl"): 
-            #     try:
-            #         with open("scheduler_output_prefill.pkl",'rb') as file:
-            #             scheduler_output_prefill = pickle.load(file)
-            #         #scheduler_output_prefill = self.scheduler.connector.qmgr.q.get_nowait()
-            #         current_new_req = [req.req_id for req in scheduler_output_prefill.scheduled_new_reqs]
-            #         if current_new_req == self.scheduler_prefill_requests:
-            #             return {}, False
-            #         else:
-            #             logger.info("Printing scheduler output")
-            #             scheduler_output=SchedulerOutput.from_scheduleroutputprefill(scheduler_output_prefill)
-            #             print(scheduler_output)
-            #             meta = self.scheduler.connector.build_connector_meta(scheduler_output)
-            #             scheduler_output.kv_connector_metadata = meta
-
-            #             model_output = self.execute_model_with_error_logging(
-            #                 self.model_executor.execute_model,  # type: ignore
-            #                 scheduler_output)
-            #             engine_core_outputs = self.scheduler.prefill_update_from_output(
-            #                 scheduler_output, model_output)
-            #             self.scheduler_prefill_requests=current_new_req
-            #     except EOFError:
-            #         logger.info("caught EOF exception")
-            #         time.sleep(0.1)
-            #         return {}, False
-            # else:
-            #         #logger.info("no scheduler output available from decode instance")
-            #         return {}, False
-
-            # scheduler_output = self.scheduler.connector.gpu_manager.get_sched_out()
-            # logger.info("Printing scheduler output")
-            # print(scheduler_output)
-            # model_output = self.execute_model_with_error_logging(
-            #             self.model_executor.execute_model,  # type: ignore
-            #             scheduler_output)
-            # engine_core_outputs = self.scheduler.prefill_update_from_output(
-            #             scheduler_output, model_output)
             
-
-        
         return (engine_core_outputs,
                 scheduler_output.total_num_scheduled_tokens > 0)
 
