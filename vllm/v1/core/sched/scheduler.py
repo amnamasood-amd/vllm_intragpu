@@ -211,39 +211,39 @@ class Scheduler(SchedulerInterface):
         scheduled_timestamp = time.monotonic()
 
         # First, schedule the RUNNING requests.
-        req_index = 0
-        if len(self.running)>1:
-            logger.info("more than 1 running prefill request")
-        while req_index < len(self.running) and token_budget > 0: 
-            request = self.running[req_index]
+        # req_index = 0
+        # if len(self.running)>1:
+        #     logger.info("more than 1 running prefill request")
+        # while req_index < len(self.running) and token_budget > 0: 
+        #     request = self.running[req_index]
 
-            num_new_tokens = (request.num_tokens_with_spec +
-                              request.num_output_placeholders -
-                              request.num_computed_tokens)
-            logger.info("running prefill request %s has num_new_tokens %d", request.request_id, num_new_tokens)
-            if (0 < self.scheduler_config.long_prefill_token_threshold <
-                    num_new_tokens):
-                num_new_tokens = (
-                    self.scheduler_config.long_prefill_token_threshold)
-            num_new_tokens = min(num_new_tokens, token_budget)
+        #     num_new_tokens = (request.num_tokens_with_spec +
+        #                       request.num_output_placeholders -
+        #                       request.num_computed_tokens)
+        #     logger.info("running prefill request %s has num_new_tokens %d", request.request_id, num_new_tokens)
+        #     if (0 < self.scheduler_config.long_prefill_token_threshold <
+        #             num_new_tokens):
+        #         num_new_tokens = (
+        #             self.scheduler_config.long_prefill_token_threshold)
+        #     num_new_tokens = min(num_new_tokens, token_budget)
 
-            # Make sure the input position does not exceed the max model len.
-            # This is necessary when using spec decoding.
-            num_new_tokens = min(
-                num_new_tokens,
-                self.max_model_len - 1 - request.num_computed_tokens)
+        #     # Make sure the input position does not exceed the max model len.
+        #     # This is necessary when using spec decoding.
+        #     num_new_tokens = min(
+        #         num_new_tokens,
+        #         self.max_model_len - 1 - request.num_computed_tokens)
 
-            scheduled_running_reqs.append(request)
-            #num_new_blocks=-(-num_new_tokens//self.block_size)
-            #allocated_blocks=self.allocated_block_ids[request.request_id]
-            #new_blocks = KVCacheBlocks(tuple(block[-num_new_blocks:] for block in allocated_blocks.blocks))
-            new_blocks=self.kv_cache_manager.create_empty_block_list()
-            #print(new_blocks)
-            req_to_new_blocks[request.request_id]=new_blocks
-            num_scheduled_tokens[request.request_id] = num_new_tokens
-            token_budget -= num_new_tokens
-            #TODO figure out where num_computed_tokens are updated
-            req_index += 1
+        #     scheduled_running_reqs.append(request)
+        #     #num_new_blocks=-(-num_new_tokens//self.block_size)
+        #     #allocated_blocks=self.allocated_block_ids[request.request_id]
+        #     #new_blocks = KVCacheBlocks(tuple(block[-num_new_blocks:] for block in allocated_blocks.blocks))
+        #     new_blocks=self.kv_cache_manager.create_empty_block_list()
+        #     #print(new_blocks)
+        #     req_to_new_blocks[request.request_id]=new_blocks
+        #     num_scheduled_tokens[request.request_id] = num_new_tokens
+        #     token_budget -= num_new_tokens
+        #     #TODO figure out where num_computed_tokens are updated
+        #     req_index += 1
 
         # Record the LoRAs in scheduled_running_reqs
         scheduled_loras: set[int] = set()
@@ -260,13 +260,11 @@ class Scheduler(SchedulerInterface):
                 
                 request = self.waiting.peek_request()
                 
-                
-
                 num_external_computed_tokens = 0
                 load_kv_async = False
 
                 #check if decode has already allocated blocks
-                if request.request_id in self.pending_allocation_req_ids:
+                if request.request_id in self.pending_allocation_req_ids or request.num_tokens > token_budget:
                     #logger.info("skipping scheduling for request %s", request.request_id)
                     #print(self.waiting)
                     #print(self.pending_allocation_req_ids)
@@ -314,7 +312,7 @@ class Scheduler(SchedulerInterface):
                 # unless it was re-added above due to new_blocks being None.
                 request = self.waiting.pop_request()
 
-                req_index += 1
+                #req_index += 1
                 self.running.append(request)
                 if self.log_stats:
                     request.record_event(EngineCoreEventType.SCHEDULED,
@@ -532,7 +530,7 @@ class Scheduler(SchedulerInterface):
             #if request.request_id in just_finished_req_ids :
             try:
                 index_req_id= just_finished_req_ids.index(request.request_id)
-                logger.info("index of req_id %s is %d", request.request_id, index_req_id)
+                #logger.info("index of req_id %s is %d", request.request_id, index_req_id)
                 assert just_finished[index_req_id][1] == request.request_id
                 event = just_finished[index_req_id][0]
                 if event<len(self.prefill_event_statuses) and self.prefill_event_statuses[event] is True:

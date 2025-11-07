@@ -174,7 +174,7 @@ main() {
         --seed 1024 \
         --dtype float16 \
         --max-model-len 8192 \
-        --max-num-batched-tokens 10010 \
+        --max-num-batched-tokens 10240 \
         --trust-remote-code \
         --gpu-memory-utilization 0.80 \
         --no-enable-prefix-caching \
@@ -218,7 +218,7 @@ main() {
         --seed 1024 \
         --dtype float16 \
         --max-model-len 8192 \
-        --max-num-batched-tokens 10010 \
+        --max-num-batched-tokens 10240 \
         --trust-remote-code \
         --gpu-memory-utilization 0.80 \
         --no-enable-prefix-caching \
