@@ -292,37 +292,56 @@ class EngineCore:
 
     def check_for_allocation(self):
         #logger.info("starting block_allocation thread")
+        counter=0
         if self.scheduler.connector.transfer_config.kv_role == "kv_producer":
             while True:
                 while self.scheduler.allocated_req_ids:
                     allocated_req_ids=self.scheduler.allocated_req_ids.copy()
+                    allocation_data = []
                     for req_id in allocated_req_ids:
-                        try:
-                            with open("req_block_data/"+req_id+".pkl",'wb') as file:
-                                pickle.dump((self.scheduler.kv_cache_manager.get_blocks(req_id)), file)
-                            self.scheduler.allocated_req_ids.remove(req_id)
-                        except EOFError:
-                            logger.info("EOFError storing block ids, moving on")
-                time.sleep(0.0001)
+                        allocation_data.append((req_id,self.scheduler.kv_cache_manager.get_blocks(req_id)))
+                        self.scheduler.allocated_req_ids.remove(req_id)
+                    try:
+                        with open("req_block_data/"+str(counter)+".pkl",'wb') as file:
+                            pickle.dump(allocation_data, file)
+                        counter+=1
+                    except EOFError:
+                        logger.info("EOFError storing block ids, Error!!")
+                time.sleep(0.001)
         else:
             while True:
                 while self.scheduler.pending_allocation_req_ids:
                     #print(self.scheduler.pending_allocation_req_ids)
-                    allocated_req_ids = []
-                    pending_allocation_req_ids = self.scheduler.pending_allocation_req_ids.copy()
-                    for req_id in pending_allocation_req_ids:
-                        if os.path.exists("req_block_data/"+req_id+".pkl"):
-                            try:
-                                with open("req_block_data/"+req_id+".pkl",'rb') as file:
-                                    block_ids=pickle.load(file)
+                    if os.path.exists("req_block_data/"+str(counter)+".pkl"):
+                        try:
+                            with open("req_block_data/"+str(counter)+".pkl",'rb') as file:
+                                allocation_data=pickle.load(file)
+                                for req_id,block_ids in allocation_data:
                                     self.scheduler.allocated_block_ids[req_id] = block_ids
-                                    allocated_req_ids.append(req_id)
-                            except EOFError:
-                                logger.info("EOFError loading block ids, moving on")
-                    for req_id in allocated_req_ids:
-                        self.scheduler.pending_allocation_req_ids.remove(req_id)
+                                    self.scheduler.allocated_req_ids.append(req_id)    
+                                    #if req_id in self.scheduler.pending_allocation_req_ids:
+                                    try:
+                                        self.scheduler.pending_allocation_req_ids.remove(req_id)
+                                    except ValueError:
+                                        pass
+                                counter+=1
+                        except EOFError:
+                            logger.info("EOFError loading block ids, moving on")
+                        
+                        # pending_allocation_req_ids = self.scheduler.pending_allocation_req_ids.copy()
+                        # for req_id in pending_allocation_req_ids:
+                        #     if os.path.exists("req_block_data/"+req_id+".pkl"):
+                        #         try:
+                        #             with open("req_block_data/"+req_id+".pkl",'rb') as file:
+                        #                 block_ids=pickle.load(file)
+                        #                 self.scheduler.allocated_block_ids[req_id] = block_ids
+                        #                 allocated_req_ids.append(req_id)
+                        #         except EOFError:
+                        #             logger.info("EOFError loading block ids, moving on")
+                        # for req_id in allocated_req_ids:
+                        #     self.scheduler.pending_allocation_req_ids.remove(req_id)
                 #print(self.scheduler.pending_allocation_req_ids)
-                time.sleep(0.0001)
+                time.sleep(0.001)
 
     def check_prefill(self):
         while True:

@@ -102,7 +102,7 @@ streams=[]
 #check_stream_flags(priority_stream_nonblocking())
 #print(streams].priority)
 #streams.append(regular_stream())
-for i in range(10):
+for i in range(2):
     cu_mask_int=(1<<32*i)-1
     #print(cu_mask_int)
     cu_mask=int_to_maskarr(cu_mask_int,10)

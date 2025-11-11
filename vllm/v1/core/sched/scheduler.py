@@ -1548,7 +1548,8 @@ class Scheduler(SchedulerInterface):
 
     def add_pendingallocation_request(self, request:Request) -> None:
         #logger.info("adding pending allocation %s", request.request_id)
-        self.pending_allocation_req_ids.append(request.request_id)
+        if request.request_id not in self.allocated_req_ids:
+            self.pending_allocation_req_ids.append(request.request_id)
 
     def finish_requests(
         self,

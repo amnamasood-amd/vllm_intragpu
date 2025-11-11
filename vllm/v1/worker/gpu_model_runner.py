@@ -371,10 +371,10 @@ class GPUModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
             # cu_mask_int=(1<<256)-1
             # cu_mask=int_to_maskarr(cu_mask_int, self.mask_words)
             # self.streams.append(stream_with_cu_mask(cu_mask))
-            # for i in range(1,5):
-            #     cu_mask_int=(1<<(64*i))-1
+            # for i in range(1,3):
+            #     cu_mask_int=(1<<(64*i + 128))-1
             #     cu_mask=int_to_maskarr(cu_mask_int, self.mask_words)
-            #     self.streams.append(stream_with_cu_mask(cu_mask)) #TODO complementary mask for prefill
+            #     self.streams.append(stream_with_cu_mask(cu_mask))
             #self.streams.append(priority_stream_nonblocking())
                 #self.streams.append(torch.cuda.Stream())
             self.record_iteration=512
@@ -1595,7 +1595,7 @@ class GPUModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
                     with open("event_statuses_"+str(self.rank)+".pkl",'wb') as file:
                         pickle.dump(self.prefill_event_statuses,file)
                     self.current_prefill_status_counter+=1
-            time.sleep(0.1)
+            time.sleep(0.0001)
         #return prefill_event_status
 
     @torch.inference_mode()
@@ -1604,11 +1604,9 @@ class GPUModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
         scheduler_output: "SchedulerOutput",
         intermediate_tensors: Optional[IntermediateTensors] = None,
     ) -> Union[ModelRunnerOutput, IntermediateTensors]:
-        #logger.info("streams[0]: %d",self.streams[0].cuda_stream)
-        #logger.info("current_stream: %d",torch.cuda.current_stream().cuda_stream)
-        # sync_event=None
+        
         # if scheduler_output.cu_mask_int is not None:
-        #     if scheduler_output.cu_mask_int < 5:
+        #     if scheduler_output.cu_mask_int < 3:
         #         #cu_mask_int=min(4,scheduler_output.cu_mask_int)
         #         current_stream=self.streams[scheduler_output.cu_mask_int]
         #         #current_stream=self.streams[0]
@@ -1627,165 +1625,165 @@ class GPUModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
         if self.kv_transfer_config.kv_role == "kv_producer":
             sync_event=torch.cuda.Event()
         else:
-            if self.prefill_events:
-                self.def_stream.wait_event(self.prefill_events[-1])
+            #if self.prefill_events:
+            #    self.def_stream.wait_event(self.prefill_events[-1])
             sync_event=torch.cuda.Event()
             #self.prefill_events.append(sync_event)
         
 
-        #with torch.cuda.stream(current_stream) as s:
-        # if self.kv_transfer_config.kv_role == "kv_producer":
-        #     sync_event=torch.cuda.Event()
-        # else:
-        #     #current_stream.synchronize()
-        #     self.def_stream.wait_event(self.prefill_events[self.prev_sync_event_counter])
-        #     #self.prefill_events[self.prev_sync_event_counter].synchronize()
-        #     sync_event=self.prefill_events[scheduler_output.prefill_event_counter]
-        #     self.prev_sync_event_counter=scheduler_output.prefill_event_counter
-        # self.prev_cu_mask_int=scheduler_output.cu_mask_int
-        # #torch.cuda.set_stream(self.model_stream)
-        
-        self._update_states(scheduler_output)
+        with torch.cuda.stream(current_stream):
+            # if self.kv_transfer_config.kv_role == "kv_producer":
+            #     sync_event=torch.cuda.Event()
+            # else:
+            #     #current_stream.synchronize()
+            #     self.def_stream.wait_event(self.prefill_events[self.prev_sync_event_counter])
+            #     #self.prefill_events[self.prev_sync_event_counter].synchronize()
+            #     sync_event=self.prefill_events[scheduler_output.prefill_event_counter]
+            #     self.prev_sync_event_counter=scheduler_output.prefill_event_counter
+            # self.prev_cu_mask_int=scheduler_output.cu_mask_int
+            # #torch.cuda.set_stream(self.model_stream)
+            
+            self._update_states(scheduler_output)
 
-        #self.current_iteration+=1
-        #with profile(activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA], with_stack=True, experimental_config=torch._C._profiler._ExperimentalConfig(verbose=True),) as prof:
-        #  with record_function("model_inference"+str(self.current_iteration)):
-        # logger.info("current iteration %d",self.current_iteration )
-        # if self.current_iteration==1:
-        #     torch.cuda.memory._record_memory_history()
+            #self.current_iteration+=1
+            #with profile(activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA], with_stack=True, experimental_config=torch._C._profiler._ExperimentalConfig(verbose=True),) as prof:
+            #  with record_function("model_inference"+str(self.current_iteration)):
+            # logger.info("current iteration %d",self.current_iteration )
+            # if self.current_iteration==1:
+            #     torch.cuda.memory._record_memory_history()
 
-        if not scheduler_output.total_num_scheduled_tokens:
-            #if scheduler_output.cu_mask_int != self.prev_cu_mask_int:
-                # if self.prev_cu_mask_int is not None:
-                #     self.streams[self.prev_cu_mask_int].synchronize()
-                # else:
-                #     self.streams[0].synchronize()
+            if not scheduler_output.total_num_scheduled_tokens:
+                #if scheduler_output.cu_mask_int != self.prev_cu_mask_int:
+                    # if self.prev_cu_mask_int is not None:
+                    #     self.streams[self.prev_cu_mask_int].synchronize()
+                    # else:
+                    #     self.streams[0].synchronize()
 
-            if not has_kv_transfer_group():
-                # Return empty ModelRunnerOutput if there's no work to do.
-                return EMPTY_MODEL_RUNNER_OUTPUT
+                if not has_kv_transfer_group():
+                    # Return empty ModelRunnerOutput if there's no work to do.
+                    return EMPTY_MODEL_RUNNER_OUTPUT
 
-            return self.kv_connector_no_forward(scheduler_output,
-                                                self.vllm_config)
+                return self.kv_connector_no_forward(scheduler_output,
+                                                    self.vllm_config)
 
-        if self.cache_config.kv_sharing_fast_prefill:
-            assert not self.input_batch.num_prompt_logprobs, (
-                "--kv-sharing-fast-prefill produces incorrect logprobs for "
-                "prompt tokens, tokens, please disable it when the requests "
-                "need prompt logprobs")
+            if self.cache_config.kv_sharing_fast_prefill:
+                assert not self.input_batch.num_prompt_logprobs, (
+                    "--kv-sharing-fast-prefill produces incorrect logprobs for "
+                    "prompt tokens, tokens, please disable it when the requests "
+                    "need prompt logprobs")
 
-        
-        
-        #with torch.cuda.stream(current_stream):
-        # Prepare the decoder inputs.
-        (attn_metadata, logits_indices, spec_decode_metadata,
-        num_scheduled_tokens_np, spec_decode_common_attn_metadata,
-        max_query_len) = self._prepare_inputs(scheduler_output)
-        #logger.info("Printing attn_metadata")
-        #print(attn_metadata)
+            
+            
+            #with torch.cuda.stream(current_stream):
+            # Prepare the decoder inputs.
+            (attn_metadata, logits_indices, spec_decode_metadata,
+            num_scheduled_tokens_np, spec_decode_common_attn_metadata,
+            max_query_len) = self._prepare_inputs(scheduler_output)
+            #logger.info("Printing attn_metadata")
+            #print(attn_metadata)
 
-        num_scheduled_tokens = scheduler_output.total_num_scheduled_tokens
-        if (self.compilation_config.cudagraph_mode != CUDAGraphMode.NONE
-                and not envs.VLLM_DISABLE_PAD_FOR_CUDAGRAPH
-                and num_scheduled_tokens <= self.cudagraph_batch_sizes[-1]):
-            # Use CUDA graphs.
-            # Add padding to the batch size.
-            num_input_tokens = self.vllm_config.pad_for_cudagraph(
-                num_scheduled_tokens)
-        else:
-            # Eager mode.
-            # Pad tokens to multiple of tensor_parallel_size when
-            # enabled collective fusion for SP
-            tp_size = self.vllm_config.parallel_config.tensor_parallel_size
-            if self.compilation_config.pass_config. \
-                enable_sequence_parallelism and tp_size > 1:
-                num_input_tokens = round_up(num_scheduled_tokens, tp_size)
+            num_scheduled_tokens = scheduler_output.total_num_scheduled_tokens
+            if (self.compilation_config.cudagraph_mode != CUDAGraphMode.NONE
+                    and not envs.VLLM_DISABLE_PAD_FOR_CUDAGRAPH
+                    and num_scheduled_tokens <= self.cudagraph_batch_sizes[-1]):
+                # Use CUDA graphs.
+                # Add padding to the batch size.
+                num_input_tokens = self.vllm_config.pad_for_cudagraph(
+                    num_scheduled_tokens)
             else:
-                num_input_tokens = num_scheduled_tokens
+                # Eager mode.
+                # Pad tokens to multiple of tensor_parallel_size when
+                # enabled collective fusion for SP
+                tp_size = self.vllm_config.parallel_config.tensor_parallel_size
+                if self.compilation_config.pass_config. \
+                    enable_sequence_parallelism and tp_size > 1:
+                    num_input_tokens = round_up(num_scheduled_tokens, tp_size)
+                else:
+                    num_input_tokens = num_scheduled_tokens
 
-        # Padding for DP
-        num_pad, num_tokens_across_dp = self.get_dp_padding(num_input_tokens)
-        num_input_tokens += num_pad
+            # Padding for DP
+            num_pad, num_tokens_across_dp = self.get_dp_padding(num_input_tokens)
+            num_input_tokens += num_pad
 
-        # _prepare_inputs may reorder the batch, so we must gather multi
-        # modal outputs after that to ensure the correct order
-        if self.supports_mm_inputs:
-            # Run the multimodal encoder if any.
-            self._execute_mm_encoder(scheduler_output)
-            mm_embeds = self._gather_mm_embeddings(scheduler_output)
-        else:
-            mm_embeds = []
+            # _prepare_inputs may reorder the batch, so we must gather multi
+            # modal outputs after that to ensure the correct order
+            if self.supports_mm_inputs:
+                # Run the multimodal encoder if any.
+                self._execute_mm_encoder(scheduler_output)
+                mm_embeds = self._gather_mm_embeddings(scheduler_output)
+            else:
+                mm_embeds = []
 
-        if self.supports_mm_inputs and get_pp_group().is_first_rank:
-            # NOTE(woosuk): To unify token ids and soft tokens (vision
-            # embeddings), we always use embeddings (rather than token ids)
-            # as input to the multimodal model, even when the input is text.
-            inputs_embeds_scheduled = self.model.get_input_embeddings(
-                input_ids=self.input_ids.gpu[:num_scheduled_tokens],
-                multimodal_embeddings=mm_embeds or None,
-            )
-
-            # TODO(woosuk): Avoid the copy. Optimize.
-            self.inputs_embeds[:num_scheduled_tokens].copy_(
-                inputs_embeds_scheduled)
-
-            input_ids = None
-            inputs_embeds = self.inputs_embeds[:num_input_tokens]
-            model_kwargs = {
-                **self._init_model_kwargs(num_scheduled_tokens),
-                **self._extract_mm_kwargs(scheduler_output),
-            }
-        else:
-            # For text-only models, we use token ids as input.
-            # While it is possible to use embeddings as input just like the
-            # multimodal models, it is not desirable for performance since
-            # then the embedding layer is not included in the CUDA graph.
-            input_ids = self.input_ids.gpu[:num_input_tokens]
-            inputs_embeds = None
-            model_kwargs = self._init_model_kwargs(num_input_tokens)
-        if self.uses_mrope:
-            positions = self.mrope_positions.gpu[:, :num_input_tokens]
-        else:
-            positions = self.positions.gpu[:num_input_tokens]
-
-        if get_pp_group().is_first_rank:
-            intermediate_tensors = None
-        else:
-            intermediate_tensors = self.sync_and_slice_intermediate_tensors(
-                num_input_tokens, intermediate_tensors, True)
-
-        uniform_decode = (max_query_len == self.uniform_decode_query_len) and (
-            num_scheduled_tokens == self.input_batch.num_reqs * max_query_len)
-        batch_descriptor = BatchDescriptor(num_tokens=num_input_tokens,
-                                        uniform_decode=uniform_decode)
-        
-        cudagraph_runtime_mode, batch_descriptor = \
-            self.cudagraph_dispatcher.dispatch(batch_descriptor)
-
-        # Run the model.
-        # Use persistent buffers for CUDA graphs.
-        other_event.record()
-        
-        with set_forward_context(
-                    attn_metadata,
-                    self.vllm_config,
-                    num_tokens=num_input_tokens,
-                    num_tokens_across_dp=num_tokens_across_dp,
-                    cudagraph_runtime_mode=cudagraph_runtime_mode,
-                    batch_descriptor=batch_descriptor,
-                    cuda_stream=current_stream,
-        ), self.maybe_get_kv_connector_output(scheduler_output) as kv_connector_output:
-            with torch.cuda.stream(current_stream):
-                #self.timing_events[0].record(stream=s)
-                current_stream.wait_event(other_event)
-                model_output = self.model(
-                    input_ids=input_ids,
-                    positions=positions,
-                    intermediate_tensors=intermediate_tensors,
-                    inputs_embeds=inputs_embeds,
-                    **model_kwargs,
+            if self.supports_mm_inputs and get_pp_group().is_first_rank:
+                # NOTE(woosuk): To unify token ids and soft tokens (vision
+                # embeddings), we always use embeddings (rather than token ids)
+                # as input to the multimodal model, even when the input is text.
+                inputs_embeds_scheduled = self.model.get_input_embeddings(
+                    input_ids=self.input_ids.gpu[:num_scheduled_tokens],
+                    multimodal_embeddings=mm_embeds or None,
                 )
-                sync_event.record()
+
+                # TODO(woosuk): Avoid the copy. Optimize.
+                self.inputs_embeds[:num_scheduled_tokens].copy_(
+                    inputs_embeds_scheduled)
+
+                input_ids = None
+                inputs_embeds = self.inputs_embeds[:num_input_tokens]
+                model_kwargs = {
+                    **self._init_model_kwargs(num_scheduled_tokens),
+                    **self._extract_mm_kwargs(scheduler_output),
+                }
+            else:
+                # For text-only models, we use token ids as input.
+                # While it is possible to use embeddings as input just like the
+                # multimodal models, it is not desirable for performance since
+                # then the embedding layer is not included in the CUDA graph.
+                input_ids = self.input_ids.gpu[:num_input_tokens]
+                inputs_embeds = None
+                model_kwargs = self._init_model_kwargs(num_input_tokens)
+            if self.uses_mrope:
+                positions = self.mrope_positions.gpu[:, :num_input_tokens]
+            else:
+                positions = self.positions.gpu[:num_input_tokens]
+
+            if get_pp_group().is_first_rank:
+                intermediate_tensors = None
+            else:
+                intermediate_tensors = self.sync_and_slice_intermediate_tensors(
+                    num_input_tokens, intermediate_tensors, True)
+
+            uniform_decode = (max_query_len == self.uniform_decode_query_len) and (
+                num_scheduled_tokens == self.input_batch.num_reqs * max_query_len)
+            batch_descriptor = BatchDescriptor(num_tokens=num_input_tokens,
+                                            uniform_decode=uniform_decode)
+            
+            cudagraph_runtime_mode, batch_descriptor = \
+                self.cudagraph_dispatcher.dispatch(batch_descriptor)
+
+            # Run the model.
+            # Use persistent buffers for CUDA graphs.
+            #other_event.record()
+            
+            with set_forward_context(
+                        attn_metadata,
+                        self.vllm_config,
+                        num_tokens=num_input_tokens,
+                        num_tokens_across_dp=num_tokens_across_dp,
+                        cudagraph_runtime_mode=cudagraph_runtime_mode,
+                        batch_descriptor=batch_descriptor,
+                        cuda_stream=current_stream,
+            ), self.maybe_get_kv_connector_output(scheduler_output) as kv_connector_output:
+                #with torch.cuda.stream(current_stream):
+                    #self.timing_events[0].record(stream=s)
+                    #current_stream.wait_event(other_event)
+                    model_output = self.model(
+                        input_ids=input_ids,
+                        positions=positions,
+                        intermediate_tensors=intermediate_tensors,
+                        inputs_embeds=inputs_embeds,
+                        **model_kwargs,
+                    )
+                    sync_event.record()
            
         # #torch.cuda.current_stream().wait_event(self.sync_event)
         #self.def_stream.wait_event(sync_event)
