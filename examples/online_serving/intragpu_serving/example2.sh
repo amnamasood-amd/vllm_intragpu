@@ -21,7 +21,7 @@
 # =============================================================================
 
 # Configuration - can be overridden via environment variables
-MODEL=${MODEL:-meta-llama/Llama-3.1-70B-Instruct}
+MODEL=${MODEL:-meta-llama/Llama-3.1-8B-Instruct}
 TIMEOUT_SECONDS=${TIMEOUT_SECONDS:-1200}
 PROXY_PORT=${PROXY_PORT:-60002}
 
@@ -144,10 +144,10 @@ main() {
     # =============================================================================
     # Launch Proxy Server
     # =============================================================================
-    # echo ""
-    # echo "Starting proxy server on port $PROXY_PORT..."
-    # python3 disagg_proxy.py &
-    # PIDS+=($!)
+    echo ""
+    echo "Starting proxy server on port $PROXY_PORT..."
+    python3 disagg_proxy.py &
+    PIDS+=($!)
 
     # Parse GPU and port arrays
     IFS=',' read -ra PREFILL_GPU_ARRAY <<< "$PREFILL_GPUS"
@@ -167,14 +167,14 @@ main() {
         local kv_port=$((22001 + i))
 
         echo "  Decode server $((i+1)): GPU $gpu_id, Port $port, KV Port $kv_port"
-        VLLM_USE_V1=1 CUDA_VISIBLE_DEVICES=0,1,2,3,4,5,6,7 vllm serve $MODEL \
+        VLLM_USE_V1=1 CUDA_VISIBLE_DEVICES=5,6 vllm serve $MODEL \
         --host 0.0.0.0 \
         --port $port \
-        --tensor-parallel-size 8 \
+        --tensor-parallel-size 2 \
         --seed 1024 \
         --dtype float16 \
         --max-model-len 8192 \
-        --max-num-batched-tokens 10240 \
+        --max-num-batched-tokens 10000 \
         --trust-remote-code \
         --gpu-memory-utilization 0.80 \
         --no-enable-prefix-caching \
@@ -211,18 +211,17 @@ main() {
         local kv_port=$((21001 + i))
 
         echo "  Prefill server $((i+1)): GPU $gpu_id, Port $port, KV Port $kv_port"
-        CUDA_VISIBLE_DEVICES=0,1,2,3,4,5,6,7 VLLM_USE_V1=1 vllm serve $MODEL \
+        CUDA_VISIBLE_DEVICES=5,6 VLLM_USE_V1=1 vllm serve $MODEL \
         --host 0.0.0.0 \
         --port $port \
-        --tensor-parallel-size 8 \
+        --tensor-parallel-size 2 \
         --seed 1024 \
         --dtype float16 \
         --max-model-len 8192 \
-        --max-num-batched-tokens 10240 \
+        --max-num-batched-tokens 10000 \
         --trust-remote-code \
         --gpu-memory-utilization 0.80 \
         --no-enable-prefix-caching \
-        --compilation-config '{"cudagraph_mode":"FULL"}' \
         --kv-transfer-config \
         "{\"kv_connector\":\"IntraGPUConnector\",\"kv_role\":\"kv_consumer\",\"kv_buffer_size\":\"1e1\",\"kv_port\":\"$kv_port\"}" > prefill.log &
         PIDS+=($!)
@@ -270,6 +269,11 @@ main() {
     #     --num-prompts 1024 --burstiness 100 --request-rate 10 --ignore-eos | tee benchmark.log
     
     # echo "Benchmarking done. Cleaning up..."
+
+    # vllm bench serve --port 10003 --seed $(date +%s) \
+    #     --model $MODEL \
+    #     --dataset-name custom --dataset-path /workspace/lmsys_custom_prompts_2k.jsonl --custom-skip-chat-template \
+    #     --num-prompts 2000 --burstiness 100 --request-rate 10 | tee benchmark.log    
 
     #python3 single_serve.py --port $PROXY_PORT --model $MODEL
     #python3 multi_serve.py --port 10001 --model $MODEL
