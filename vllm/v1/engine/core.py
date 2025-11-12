@@ -178,7 +178,18 @@ class EngineCore:
                 block_size, caching_hash_fn)
 
         #self.scheduler_prefill_requests = []
+        
+        #for async decode scheduling
+        if self.scheduler.connector.transfer_config.kv_role=="kv_producer":
+            self.next_scheduler_output_ready: bool=False
+            self.next_scheduler_output: Optional[SchedulerOutput] = None
+            next_scheduling_thread=threading.Thread(target=self.async_decode_scheduling, daemon=True)
+            next_scheduling_thread.start()
+        
+        #for logging
         self.iteration_time_log=[]
+
+
 
     def _initialize_kv_caches(
             self, vllm_config: VllmConfig) -> tuple[int, int, KVCacheConfig]:
@@ -349,7 +360,7 @@ class EngineCore:
                 logger.info("checking status of prefill counter %d", self.scheduler.current_prefill_event_counter)
                 current_prefill_event_status = self.model_executor.check_prefill_status()
                 self.scheduler.update_after_prefill_status(current_prefill_event_status)
-            time.sleep(0.0001)
+            time.sleep(0.001)
 
     def check_prefill_decode(self):
         while True:
@@ -363,6 +374,14 @@ class EngineCore:
                     logger.info("cannot open prefill event status file")
             time.sleep(0.01)
 
+    def async_decode_scheduling(self):
+        while True:
+            if self.next_scheduler_output_ready == False:
+                #logger.info("scheduling start")
+                self.next_scheduler_output=self.scheduler.schedule()
+                #logger.info("scheduling end")
+                self.next_scheduler_output_ready=True
+            time.sleep(0.001)
 
     def abort_requests(self, request_ids: list[str]):
         """Abort requests from the scheduler."""
@@ -411,7 +430,13 @@ class EngineCore:
         if self.scheduler.connector.transfer_config.kv_role == "kv_producer":
             #if not self.scheduler.has_requests():
             #    return {}, False
-            scheduler_output = self.scheduler.schedule()
+            #scheduler_output = self.scheduler.schedule()
+            while True:
+                if self.next_scheduler_output_ready==True:
+                    scheduler_output=self.next_scheduler_output
+                    self.next_scheduler_output_ready=False
+                    break
+                time.sleep(0.001)
             if scheduler_output:
                 #logger.info("in core calling execute model and checking connector")
                 #self.scheduler.connector.qmgr.set_sched_out(scheduler_output) #temporary test. this has to shift to scheduler
