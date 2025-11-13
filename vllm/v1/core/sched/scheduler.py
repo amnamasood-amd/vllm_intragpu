@@ -895,49 +895,49 @@ class Scheduler(SchedulerInterface):
         #         pickle.dump(scheduler_output_prefill, file)
         
         #if no scheduled tokens, all requests are in prefill
-        if num_scheduled_tokens:
+        #if num_scheduled_tokens:
             # Construct the scheduler output.
-            new_reqs_data = [
-                NewRequestData.from_request(
-                    req, req_to_new_blocks[req.request_id].get_block_ids())
-                for req in scheduled_new_reqs
-            ]
-            cached_reqs_data = self._make_cached_request_data(
-                scheduled_running_reqs,
-                scheduled_resumed_reqs,
-                num_scheduled_tokens,
-                scheduled_spec_decode_tokens,
-                req_to_new_blocks,
-            )
-            #logger.info("Cached req data")
-            #print(cached_reqs_data)
+        new_reqs_data = [
+            NewRequestData.from_request(
+                req, req_to_new_blocks[req.request_id].get_block_ids())
+            for req in scheduled_new_reqs
+        ]
+        cached_reqs_data = self._make_cached_request_data(
+            scheduled_running_reqs,
+            scheduled_resumed_reqs,
+            num_scheduled_tokens,
+            scheduled_spec_decode_tokens,
+            req_to_new_blocks,
+        )
+        #logger.info("Cached req data")
+        #print(cached_reqs_data)
 
-            structured_output_request_ids, grammar_bitmask = (
-                self.get_grammar_bitmask(self.running,
-                                        scheduled_spec_decode_tokens))
-            scheduler_output = SchedulerOutput(
-                scheduled_new_reqs=new_reqs_data,
-                scheduled_cached_reqs=cached_reqs_data,
-                num_scheduled_tokens=num_scheduled_tokens,
-                total_num_scheduled_tokens=sum(num_scheduled_tokens.values()),
-                scheduled_spec_decode_tokens=scheduled_spec_decode_tokens,
-                scheduled_encoder_inputs=scheduled_encoder_inputs,
-                num_common_prefix_blocks=num_common_prefix_blocks,
-                # finished_req_ids is an existing state in the scheduler,
-                # instead of being newly scheduled in this step.
-                # It contains the request IDs that are finished in between
-                # the previous and the current steps.
-                finished_req_ids=self.finished_req_ids,
-                free_encoder_mm_hashes=self.encoder_cache_manager.
-                get_freed_mm_hashes(),
-                structured_output_request_ids=structured_output_request_ids,
-                grammar_bitmask=grammar_bitmask,
-                cu_mask_int=cu_mask_int,
-                #prefill_event_counter=self.current_prefill_event_counter,
-            )
-            #print(scheduler_output)
-        else:
-            return None
+        structured_output_request_ids, grammar_bitmask = (
+            self.get_grammar_bitmask(self.running,
+                                    scheduled_spec_decode_tokens))
+        scheduler_output = SchedulerOutput(
+            scheduled_new_reqs=new_reqs_data,
+            scheduled_cached_reqs=cached_reqs_data,
+            num_scheduled_tokens=num_scheduled_tokens,
+            total_num_scheduled_tokens=sum(num_scheduled_tokens.values()),
+            scheduled_spec_decode_tokens=scheduled_spec_decode_tokens,
+            scheduled_encoder_inputs=scheduled_encoder_inputs,
+            num_common_prefix_blocks=num_common_prefix_blocks,
+            # finished_req_ids is an existing state in the scheduler,
+            # instead of being newly scheduled in this step.
+            # It contains the request IDs that are finished in between
+            # the previous and the current steps.
+            finished_req_ids=self.finished_req_ids,
+            free_encoder_mm_hashes=self.encoder_cache_manager.
+            get_freed_mm_hashes(),
+            structured_output_request_ids=structured_output_request_ids,
+            grammar_bitmask=grammar_bitmask,
+            cu_mask_int=cu_mask_int,
+            #prefill_event_counter=self.current_prefill_event_counter,
+        )
+        #print(scheduler_output)
+        # else:
+        #     return None
         
         # NOTE(Kuntai): this function is designed for multiple purposes:
         # 1. Plan the KV cache store
