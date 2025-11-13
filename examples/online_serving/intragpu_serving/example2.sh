@@ -21,7 +21,7 @@
 # =============================================================================
 
 # Configuration - can be overridden via environment variables
-MODEL=${MODEL:-meta-llama/Llama-3.1-8B-Instruct}
+MODEL=${MODEL:-meta-llama/Llama-3.1-70B-Instruct}
 TIMEOUT_SECONDS=${TIMEOUT_SECONDS:-1200}
 PROXY_PORT=${PROXY_PORT:-60002}
 
@@ -167,10 +167,10 @@ main() {
         local kv_port=$((22001 + i))
 
         echo "  Decode server $((i+1)): GPU $gpu_id, Port $port, KV Port $kv_port"
-        VLLM_USE_V1=1 CUDA_VISIBLE_DEVICES=5,6 vllm serve $MODEL \
+        VLLM_USE_V1=1 CUDA_VISIBLE_DEVICES=0,1,2,3,4,5,6,7 vllm serve $MODEL \
         --host 0.0.0.0 \
         --port $port \
-        --tensor-parallel-size 2 \
+        --tensor-parallel-size 8 \
         --seed 1024 \
         --dtype float16 \
         --max-model-len 8192 \
@@ -211,10 +211,10 @@ main() {
         local kv_port=$((21001 + i))
 
         echo "  Prefill server $((i+1)): GPU $gpu_id, Port $port, KV Port $kv_port"
-        CUDA_VISIBLE_DEVICES=5,6 VLLM_USE_V1=1 vllm serve $MODEL \
+        CUDA_VISIBLE_DEVICES=0,1,2,3,4,5,6,7 VLLM_USE_V1=1 vllm serve $MODEL \
         --host 0.0.0.0 \
         --port $port \
-        --tensor-parallel-size 2 \
+        --tensor-parallel-size 8 \
         --seed 1024 \
         --dtype float16 \
         --max-model-len 8192 \
@@ -262,13 +262,13 @@ main() {
     # =============================================================================
     # Run Benchmark
     # =============================================================================
-    # cd ../../../benchmarks/
-    # vllm bench serve --port 10003 --seed $(date +%s) \
-    #     --model $MODEL \
-    #     --dataset-name random --random-input-len 1024 --random-output-len 256 \
-    #     --num-prompts 1024 --burstiness 100 --request-rate 10 --ignore-eos | tee benchmark.log
+    cd ../../../benchmarks/
+    vllm bench serve --port 10003 --seed $(date +%s) \
+        --model $MODEL \
+        --dataset-name random --random-input-len 1024 --random-output-len 256 \
+        --num-prompts 1024 --burstiness 100 --request-rate 10 --ignore-eos | tee benchmark.log
     
-    # echo "Benchmarking done. Cleaning up..."
+    echo "Benchmarking done. Cleaning up..."
 
     # vllm bench serve --port 10003 --seed $(date +%s) \
     #     --model $MODEL \
@@ -277,7 +277,7 @@ main() {
 
     #python3 single_serve.py --port $PROXY_PORT --model $MODEL
     #python3 multi_serve.py --port 10001 --model $MODEL
-    python3 multi_serve_no_proxy.py --model $MODEL
+    #python3 multi_serve_no_proxy.py --model $MODEL
     rm /workspace/vllm_intragpu_prev/examples/online_serving/intragpu_serving/*.pkl
     rm /workspace/vllm_intragpu_prev/examples/online_serving/intragpu_serving/req_block_data/*
     cleanup

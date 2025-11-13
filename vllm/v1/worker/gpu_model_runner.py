@@ -1634,12 +1634,14 @@ class GPUModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
         
         other_event.record()
         with torch.cuda.stream(current_stream):
-            if self.kv_transfer_config.kv_role == "kv_producer":
-                if self.prev_event is not None:
-                    current_stream.wait_event(self.prev_event)
-                self.prev_event=sync_event
-            else:
-                current_stream.wait_event(other_event)
+            # if self.kv_transfer_config.kv_role == "kv_producer":
+            #     if self.prev_event is not None:
+            #         current_stream.wait_event(self.prev_event)
+            #     self.prev_event=sync_event
+            # else:
+            #     current_stream.wait_event(other_event)
+            current_stream.wait_event(other_event)
+
             # if self.kv_transfer_config.kv_role == "kv_producer":
             #     sync_event=torch.cuda.Event()
             # else:
