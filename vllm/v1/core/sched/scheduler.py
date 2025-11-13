@@ -1293,6 +1293,8 @@ class Scheduler(SchedulerInterface):
         engine_core_outputs = {}
 
         finished_req_ids = self.finished_req_ids_dict
+        # logger.info("finished req_ids")
+        # print(finished_req_ids)
         if finished_req_ids:
             # Include ids of requests that finished since last outputs
             # were sent.
@@ -1459,7 +1461,7 @@ class Scheduler(SchedulerInterface):
                     engine_core_outputs[client_index] = EngineCoreOutputs(
                         finished_requests=finished_set)
             logger.info("finished_req_ids")
-            print(finished_req-ids)
+            print(finished_req_ids)
             finished_req_ids.clear()
 
         if (stats := self.make_stats(spec_decoding_stats)) is not None:
@@ -1626,10 +1628,16 @@ class Scheduler(SchedulerInterface):
 
     def get_num_unfinished_requests(self) -> int:
         #logger.info("waiting requests %d running requests %d", len(self.waiting), len(self.running))
+        # logger.info("waiting requests")
+        # print(self.waiting)
+        # logger.info("running requests")
+        # print(self.running)
         return len(self.waiting) + len(self.running)
 
     def has_finished_requests(self) -> bool:
         #logger.info("finished_req %d", len(self.finished_req_ids))
+        # logger.info("finished_req_ids")
+        # print(self.finished_req_ids)
         return len(self.finished_req_ids) > 0
 
     def reset_prefix_cache(self) -> bool:

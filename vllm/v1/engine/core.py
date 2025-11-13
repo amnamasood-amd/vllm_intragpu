@@ -183,6 +183,10 @@ class EngineCore:
         if self.scheduler.connector.transfer_config.kv_role=="kv_producer":
             self.next_scheduler_output_ready: bool=False
             self.next_scheduler_output: Optional[SchedulerOutput] = None
+            self.model_output_ready:bool=False
+            self.current_model_output:Optional[ModelRunnerOutput]=None
+            self.current_scheduler_output:Optional[SchedulerOutput]=None
+            self.current_engine_core_outputs = {}
             next_scheduling_thread=threading.Thread(target=self.async_decode_scheduling, daemon=True)
             next_scheduling_thread.start()
         
@@ -375,11 +379,37 @@ class EngineCore:
             time.sleep(0.01)
 
     def async_decode_scheduling(self):
+        # while True:
+        #     if self.model_output_ready==True:
+        #         self.current_engine_core_outputs = self.scheduler.update_from_output(
+        #             self.current_scheduler_output, self.current_model_output)  # type: ignore
+        #         self.model_output_ready=False
+        #     elif self.current_model_output is not None:
+        #         #self.scheduler.handle_finished_requests()
+        #         #self.scheduler._update_after_schedule(self.current_scheduler_output)
+        #         time.sleep(0.001)
+        #         continue
+
+        #     if self.next_scheduler_output_ready == False:
+        #         #logger.info("scheduling start")
+        #         self.next_scheduler_output=self.scheduler.schedule()
+        #         #logger.info("scheduling end")
+        #         self.next_scheduler_output_ready=True
+        #     time.sleep(0.001)
+
         while True:
             if self.next_scheduler_output_ready == False:
                 #logger.info("scheduling start")
+                if self.current_model_output is not None:
+                    self.current_engine_core_outputs = self.scheduler.update_from_output(
+                        self.current_scheduler_output, self.current_model_output)  # type: ignore
+                    self.current_model_output=None
+                else:
+                    self.scheduler.handle_finished_requests()
                 self.next_scheduler_output=self.scheduler.schedule()
                 #logger.info("scheduling end")
+                logger.info("finished ids")
+                print(self.scheduler.finished_req_ids)
                 self.next_scheduler_output_ready=True
             time.sleep(0.001)
 
@@ -431,32 +461,58 @@ class EngineCore:
             #if not self.scheduler.has_requests():
             #    return {}, False
             #scheduler_output = self.scheduler.schedule()
-            while True:
-                if self.next_scheduler_output_ready==True:
-                    scheduler_output=self.next_scheduler_output
-                    self.next_scheduler_output_ready=False
-                    break
-                time.sleep(0.001)
-            if scheduler_output:
+            # while True:
+            #     if self.next_scheduler_output_ready==True:
+            #         logger.info("got scheduler output")
+            #         scheduler_output=self.next_scheduler_output
+            #         self.next_scheduler_output_ready=False
+            #         break
+            #     time.sleep(0.001)
+            # if scheduler_output:
+            if self.next_scheduler_output_ready==True:
+                logger.info("got scheduler output")
+                scheduler_output=self.next_scheduler_output
+                self.next_scheduler_output_ready=False
                 #logger.info("in core calling execute model and checking connector")
                 #self.scheduler.connector.qmgr.set_sched_out(scheduler_output) #temporary test. this has to shift to scheduler
                 #sched_out_prefill = SchedulerOutputPrefill.from_scheduler_output(scheduler_output)
                 #self.scheduler.connector.qmgr.q.put(sched_out_prefill)
                 #print(scheduler_output.kv_connector_metadata)
-                logger.info("starting model")
-                start_time=time.monotonic()
-                model_output = self.execute_model_with_error_logging(
-                    self.model_executor.execute_model,  # type: ignore
-                    scheduler_output)
-                end_time=time.monotonic()
-                iteration_time=end_time-start_time
-                self.iteration_time_log.append([str(scheduler_output.total_num_scheduled_tokens),str(scheduler_output.cu_mask_int),str(iteration_time)])
-                logger.info("finished model, getting outputs time %f", iteration_time)
-                engine_core_outputs = self.scheduler.update_from_output(
-                    scheduler_output, model_output)  # type: ignore
-                #print(engine_core_outputs)
+                if scheduler_output:
+                    logger.info("starting model")
+                    start_time=time.monotonic()
+                    model_output = self.execute_model_with_error_logging(
+                        self.model_executor.execute_model,  # type: ignore
+                        scheduler_output)
+                    end_time=time.monotonic()
+                    iteration_time=end_time-start_time
+                    self.iteration_time_log.append([str(scheduler_output.total_num_scheduled_tokens),str(scheduler_output.cu_mask_int),str(iteration_time)])
+                    logger.info("finished model, getting outputs time %f", iteration_time)
+                    # while True:
+                    #     if self.model_output_ready==False:
+                    #         self.current_model_output=model_output
+                    #         self.current_scheduler_output=scheduler_output
+                    #         engine_core_outputs=self.current_engine_core_outputs
+                    #         logger.info("printing engine core outputs")
+                    #         print(engine_core_outputs)
+                    #         self.model_output_ready=True
+                    #         break
+                    while True:
+                        if self.next_scheduler_output_ready==True:
+                            self.current_model_output=model_output
+                            self.current_scheduler_output=scheduler_output
+                            engine_core_outputs=self.current_engine_core_outputs
+                            logger.info("printing engine core outputs")
+                            print(engine_core_outputs)
+                            break
+                            
+                            #engine_core_outputs = self.scheduler.update_from_output(
+                            #    scheduler_output, model_output)  # type: ignore
+                    #print(engine_core_outputs)
+                else:
+                    return {}, False #self.scheduler.handle_finished_requests(), False
             else:
-                return self.scheduler.handle_finished_requests(), False
+                return {}, False #self.scheduler.handle_finished_requests(), False
         else:
             #return {}, True
             # if self.scheduler.pending_prefill_requests and self.scheduler.current_prefill_event_counter<len(self.scheduler.pending_prefill_requests):
