@@ -36,6 +36,8 @@ from vllm.v1.executor.abstract import Executor, FailureCallback
 from vllm.v1.outputs import DraftTokenIds, ModelRunnerOutput
 from vllm.worker.worker_base import WorkerWrapperBase
 
+import time
+
 logger = init_logger(__name__)
 
 
@@ -240,6 +242,8 @@ class MultiprocExecutor(Executor):
             workers = (self.workers[unique_reply_rank],
                        ) if unique_reply_rank is not None else self.workers
             responses = []
+
+            #time.sleep(0.001)
 
             def get_response(w: WorkerProcHandle,
                              dequeue_timeout: Optional[float] = None,

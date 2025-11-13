@@ -177,6 +177,7 @@ main() {
         --max-num-batched-tokens 10000 \
         --trust-remote-code \
         --gpu-memory-utilization 0.80 \
+        --async_scheduling \
         --no-enable-prefix-caching \
         --compilation-config '{"cudagraph_mode":"FULL"}' \
         --kv-transfer-config \

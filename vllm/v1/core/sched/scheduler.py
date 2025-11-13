@@ -188,6 +188,7 @@ class Scheduler(SchedulerInterface):
         self.running_prefill: list[Request] = []
         self.finished_req_ids_prefill: list[(int,str)]= []
         self.prefill_event_statuses: list[bool] = []
+        self.allocation_counter: int=0
         #self.current_scheduled_requests: list[str]=[]
         #self.current_prefill_event=None
 
@@ -482,6 +483,7 @@ class Scheduler(SchedulerInterface):
         scheduled_running_reqs_prefill: list[Request] = []
         scheduled_resumed_reqs_prefill: list[Request] = []
         num_scheduled_tokens_prefill: dict[str, int] = {}
+        allocation_block_data = []
 
         if os.path.exists("event_statuses_0.pkl"):
             try:
@@ -550,6 +552,8 @@ class Scheduler(SchedulerInterface):
             num_new_tokens = (request.num_tokens_with_spec +
                               request.num_output_placeholders -
                               request.num_computed_tokens)
+
+            #logger.info("request %s num_tokens_with_spec %d num_output_placeholders %d num_computed_tokens %d", request.request_id, request.num_tokens_with_spec, request.num_output_placeholders,request.num_computed_tokens)
 
             if (0 < self.scheduler_config.long_prefill_token_threshold <
                     num_new_tokens):
@@ -772,11 +776,9 @@ class Scheduler(SchedulerInterface):
                     #scheduled_new_reqs.append(request)
                     if num_new_tokens>1:
                         scheduled_new_reqs_prefill.append(request)
-                        self.allocated_block_ids[request.request_id]=self.kv_cache_manager.get_blocks(request.request_id)
-                        #self.pending_allocation_req_ids.remove(request.request_id)
-                        self.allocated_req_ids.append(request.request_id)
-                        #with open("req_block_data/"+request.request_id+".pkl",'wb') as file:
-                        #    pickle.dump((self.kv_cache_manager.get_blocks(request.request_id)), file)
+                        allocation_block_data.append((request.request_id,self.kv_cache_manager.get_blocks(request.request_id)))
+                        #self.allocated_block_ids[request.request_id]=self.kv_cache_manager.get_blocks(request.request_id)
+                        #self.allocated_req_ids.append(request.request_id)
                     else:
                         scheduled_new_reqs.append(request)
                         logger.info("should not be scheduling decode requests here")
@@ -809,6 +811,17 @@ class Scheduler(SchedulerInterface):
                 if request.num_cached_tokens < 0:
                     request.num_cached_tokens = num_computed_tokens
 
+        if allocation_block_data:
+            while True:
+                try:
+                    with open("req_block_data/"+str(self.allocation_counter)+".pkl",'wb') as file:
+                        pickle.dump(allocation_block_data, file)
+                    self.allocation_counter+=1
+                    break
+                except EOFError:
+                    logger.info("EOFError storing block ids, Error!!")
+                    time.sleep(0.001)
+        
         # Put back any skipped requests at the head of the waiting queue
         if skipped_waiting_requests:
             logger.info("there should be no skipped requests")
@@ -980,6 +993,8 @@ class Scheduler(SchedulerInterface):
             # and thus are unaffected by speculative decoding.
             if request.has_encoder_inputs:
                 self._free_encoder_inputs(request)
+
+            #request.num_output_placeholders+=1
 
         # Clear the finished request IDs.
         # NOTE: We shouldn't do self.finished_req_ids.clear() here because
