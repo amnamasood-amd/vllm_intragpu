@@ -390,27 +390,26 @@ class Scheduler(SchedulerInterface):
         structured_output_request_ids, grammar_bitmask = (
                 self.get_grammar_bitmask(self.running,
                                         scheduled_spec_decode_tokens))
-        cu_mask_int=None
-        #time.sleep(0.00001)
-        # if num_scheduled_tokens:
-        #     while True:
-        #         if os.path.exists("cu_mask_int.pkl"):
-        #             try:
-        #                 with open("cu_mask_int.pkl","rb") as file:
-        #                     temp = pickle.load(file)
-        #                 cu_mask_int = temp[0]
-        #                 current_prefill_counter=temp[1]
-        #                 if current_prefill_counter != self.prev_prefill_counter:
-        #                     logger.info("got cu_mask_int %d current_prefill_counter %d", cu_mask_int, current_prefill_counter)
-        #                     self.prev_prefill_counter=current_prefill_counter
-        #                     break
-        #                 #break
-        #             except EOFError:
-        #                 #logger.info("cannot open cu_mask file")
-        #                 continue
-        #         time.sleep(0.0001)
-        # else:
-        #     cu_mask_int=None
+        #cu_mask_int=None
+        if num_scheduled_tokens:
+            while True:
+                if os.path.exists("cu_mask_int.pkl"):
+                    try:
+                        with open("cu_mask_int.pkl","rb") as file:
+                            temp = pickle.load(file)
+                        cu_mask_int = temp[0]
+                        current_prefill_counter=temp[1]
+                        if current_prefill_counter != self.prev_prefill_counter:
+                            logger.info("got cu_mask_int %d current_prefill_counter %d", cu_mask_int, current_prefill_counter)
+                            self.prev_prefill_counter=current_prefill_counter
+                            break
+                        #break
+                    except EOFError:
+                        #logger.info("cannot open cu_mask file")
+                        continue
+                time.sleep(0.0001)
+        else:
+            cu_mask_int=None
 
         scheduler_output = SchedulerOutput(
                 scheduled_new_reqs=new_reqs_data,
@@ -484,6 +483,7 @@ class Scheduler(SchedulerInterface):
         scheduled_resumed_reqs_prefill: list[Request] = []
         num_scheduled_tokens_prefill: dict[str, int] = {}
         allocation_block_data = []
+        initial_running_prefill_len = len(self.running_prefill)
 
         if os.path.exists("event_statuses_0.pkl"):
             try:
@@ -505,8 +505,8 @@ class Scheduler(SchedulerInterface):
         #logger.info("finished req ids from prefill")
         #print(just_finished)
         just_finished = list(set(just_finished)-set(self.finished_req_ids_prefill))
-        if just_finished:
-            self.prev_prefill_counter+=1
+        # if just_finished:
+        #     self.prev_prefill_counter+=1
         # logger.info("finished_req_ids_prefill")
         # print(self.finished_req_ids_prefill)
         # logger.info("just_finished")
@@ -845,11 +845,13 @@ class Scheduler(SchedulerInterface):
         prefill_running = len(self.running_prefill)>0
         if prefill_running:
             #cu_mask_int=32*((8*total_num_scheduled_tokens+31)//32) #TODO: potentially cap at 256
-
             cu_mask_int=(total_num_scheduled_tokens+63)//64 #min(9,((total_num_scheduled_tokens+31)//32)) #for no capping, max should be 9
-            logger.info("cu_mask_int %d prefill_counter %d", cu_mask_int, self.prev_prefill_counter)
-            #with open("cu_mask_int.pkl","wb") as file:
-            #    pickle.dump([cu_mask_int, self.prev_prefill_counter],file)
+
+            if initial_running_prefill_len != len(self.running_prefill):
+                self.prev_prefill_counter+=1
+                logger.info("cu_mask_int %d prefill_counter %d", cu_mask_int, self.prev_prefill_counter)
+                with open("cu_mask_int.pkl","wb") as file:
+                    pickle.dump([cu_mask_int, self.prev_prefill_counter],file)
         else:
             cu_mask_int=None
         

@@ -222,6 +222,7 @@ main() {
         --max-num-batched-tokens 10000 \
         --trust-remote-code \
         --gpu-memory-utilization 0.80 \
+        --compilation-config '{"cudagraph_mode":"FULL"}' \
         --no-enable-prefix-caching \
         --kv-transfer-config \
         "{\"kv_connector\":\"IntraGPUConnector\",\"kv_role\":\"kv_consumer\",\"kv_buffer_size\":\"1e1\",\"kv_port\":\"$kv_port\"}" > prefill.log &
