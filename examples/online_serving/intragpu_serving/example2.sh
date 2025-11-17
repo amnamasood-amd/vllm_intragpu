@@ -173,13 +173,12 @@ main() {
         --tensor-parallel-size 8 \
         --seed 1024 \
         --dtype float16 \
-        --max-model-len 8192 \
+        --max-model-len 131072 \
         --max-num-batched-tokens 10000 \
         --trust-remote-code \
         --gpu-memory-utilization 0.80 \
         --async_scheduling \
         --no-enable-prefix-caching \
-        --compilation-config '{"cudagraph_mode":"FULL"}' \
         --kv-transfer-config \
         "{\"kv_connector\":\"IntraGPUConnector\",\"kv_role\":\"kv_producer\",\"kv_buffer_size\":\"8e9\",\"kv_port\":\"$kv_port\"}" > decode.log &
         PIDS+=($!)
@@ -218,11 +217,11 @@ main() {
         --tensor-parallel-size 8 \
         --seed 1024 \
         --dtype float16 \
-        --max-model-len 8192 \
-        --max-num-batched-tokens 10000 \
+        --max-model-len 131072 \
+        --max-num-batched-tokens 20000 \
+        --max-num-seqs 64 \
         --trust-remote-code \
         --gpu-memory-utilization 0.80 \
-        --compilation-config '{"cudagraph_mode":"FULL"}' \
         --no-enable-prefix-caching \
         --kv-transfer-config \
         "{\"kv_connector\":\"IntraGPUConnector\",\"kv_role\":\"kv_consumer\",\"kv_buffer_size\":\"1e1\",\"kv_port\":\"$kv_port\"}" > prefill.log &
@@ -264,18 +263,18 @@ main() {
     # =============================================================================
     # Run Benchmark
     # =============================================================================
-    cd ../../../benchmarks/
-    vllm bench serve --port 10003 --seed $(date +%s) \
-        --model $MODEL \
-        --dataset-name random --random-input-len 1024 --random-output-len 256 \
-        --num-prompts 1024 --burstiness 100 --request-rate 10 --ignore-eos | tee benchmark.log
-    
-    echo "Benchmarking done. Cleaning up..."
-
+    # cd ../../../benchmarks/
     # vllm bench serve --port 10003 --seed $(date +%s) \
     #     --model $MODEL \
-    #     --dataset-name custom --dataset-path /workspace/lmsys_custom_prompts_2k.jsonl --custom-skip-chat-template \
-    #     --num-prompts 2000 --burstiness 100 --request-rate 10 | tee benchmark.log    
+    #     --dataset-name random --random-input-len 1024 --random-output-len 256 \
+    #     --num-prompts 1024 --burstiness 100 --request-rate 10 --ignore-eos | tee benchmark.log
+    
+    # echo "Benchmarking done. Cleaning up..."
+
+    vllm bench serve --port 10003 --seed $(date +%s) \
+       --model $MODEL \
+       --dataset-name custom --dataset-path /workspace/lmsys_custom_prompts_10k.jsonl --custom-skip-chat-template \
+       --num-prompts 10000 --burstiness 100 --request-rate 20 | tee benchmark.log    
 
     #python3 single_serve.py --port $PROXY_PORT --model $MODEL
     #python3 multi_serve.py --port 10001 --model $MODEL
