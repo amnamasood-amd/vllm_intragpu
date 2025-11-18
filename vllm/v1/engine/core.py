@@ -55,6 +55,7 @@ from queue import Empty
 import time
 import pickle
 from vllm.v1.outputs import EMPTY_MODEL_RUNNER_OUTPUT
+import copy
 
 logger = init_logger(__name__)
 
@@ -186,7 +187,7 @@ class EngineCore:
             self.current_scheduler_output:Optional[SchedulerOutput]=None
             self.current_engine_core_outputs = {}
             next_scheduling_thread=threading.Thread(target=self.async_decode_scheduling, daemon=True)
-            next_scheduling_thread.start()
+            #next_scheduling_thread.start()
         else:
             block_allocation_thread = threading.Thread(target=self.check_for_allocation, daemon=True)
             block_allocation_thread.start()
@@ -406,7 +407,7 @@ class EngineCore:
         # TODO: The scheduler doesn't really need to know the
         # specific finish reason, TBD whether we propagate that
         # (i.e. client-aborted vs stop criteria met).
-        logger.info("aborting request")
+        #logger.info("aborting request")
         self.scheduler.finish_requests(request_ids,
                                        RequestStatus.FINISHED_ABORTED)
 
@@ -458,7 +459,7 @@ class EngineCore:
             # if scheduler_output:
             if self.next_scheduler_output_ready==True:
                 logger.info("got scheduler output")
-                scheduler_output=self.next_scheduler_output
+                scheduler_output=copy.deepcopy(self.next_scheduler_output)
                 self.next_scheduler_output_ready=False
                 #logger.info("in core calling execute model and checking connector")
                 #self.scheduler.connector.qmgr.set_sched_out(scheduler_output) #temporary test. this has to shift to scheduler
@@ -466,7 +467,7 @@ class EngineCore:
                 #self.scheduler.connector.qmgr.q.put(sched_out_prefill)
                 #print(scheduler_output.kv_connector_metadata)
                 #if scheduler_output:
-                logger.info("starting model")
+                #logger.info("starting model")
                 start_time=time.monotonic()
                 model_output = self.execute_model_with_error_logging(
                     self.model_executor.execute_model,  # type: ignore
@@ -474,7 +475,7 @@ class EngineCore:
                 end_time=time.monotonic()
                 iteration_time=end_time-start_time
                 self.iteration_time_log.append([str(scheduler_output.total_num_scheduled_tokens),str(scheduler_output.cu_mask_int),str(iteration_time)])
-                logger.info("finished model, getting outputs time %f", iteration_time)
+                logger.info("finished model, decode batch size, getting outputs time %f", scheduler_output.total_num_scheduled_tokens, iteration_time)
                 # while True:
                 #     if self.model_output_ready==False:
                 #         self.current_model_output=model_output
@@ -510,15 +511,15 @@ class EngineCore:
             #     self.scheduler.update_after_prefill_status(current_prefill_event_status)
             scheduler_output = self.scheduler.prefill_schedule()
             if scheduler_output.num_scheduled_tokens:    
-                logger.info("starting model")
-                start_time=time.monotonic()
+                #logger.info("starting model")
+                #start_time=time.monotonic()
                 model_output = self.execute_model_with_error_logging(
                     self.model_executor.execute_model,  # type: ignore
                     scheduler_output)
-                end_time=time.monotonic()
-                iteration_time=end_time-start_time
-                self.iteration_time_log.append([str(scheduler_output.total_num_scheduled_tokens),str(scheduler_output.cu_mask_int),str(iteration_time)])
-                logger.info("finished model, getting outputs time %f", iteration_time)
+                #end_time=time.monotonic()
+                #iteration_time=end_time-start_time
+                #self.iteration_time_log.append([str(scheduler_output.total_num_scheduled_tokens),str(scheduler_output.cu_mask_int),str(iteration_time)])
+                #logger.info("finished model, getting outputs time %f", iteration_time)
                 engine_core_outputs = self.scheduler.prefill_update_from_output(
                     scheduler_output, model_output)  # type: ignore
                 #print(engine_core_outputs)
@@ -584,6 +585,7 @@ class EngineCore:
         future, scheduler_output = batch_queue.pop()
         model_output = self.execute_model_with_error_logging(
             lambda _: future.result(), scheduler_output)
+        #self.iteration_time_log.append([str(scheduler_output.total_num_scheduled_tokens),str(scheduler_output.cu_mask_int)])
 
         engine_core_outputs = self.scheduler.update_from_output(
             scheduler_output, model_output)
@@ -591,16 +593,16 @@ class EngineCore:
         return engine_core_outputs, model_executed
 
     def shutdown(self):
-        if self.scheduler.connector.transfer_config.kv_role == "kv_producer":
-            with open("decode_iteration.log", 'wb') as file:
-                pickle.dump(self.iteration_time_log, file)
-            #with open("decode_iteration.log", 'w') as file:
-            #    file.write("\n".join(self.iteration_time_log, file))
-        else:
-            with open("prefill_iteration.log", 'wb') as file:
-                pickle.dump(self.iteration_time_log, file)
-            #with open("prefill_iteration.log", 'w') as file:
-            #    file.write("\n".join(self.iteration_time_log, file))
+        # if self.scheduler.connector.transfer_config.kv_role == "kv_producer":
+        #     with open("decode_iteration.log", 'wb') as file:
+        #         pickle.dump(self.iteration_time_log, file)
+        #     #with open("decode_iteration.log", 'w') as file:
+        #     #    file.write("\n".join(self.iteration_time_log, file))
+        # else:
+        #     with open("prefill_iteration.log", 'wb') as file:
+        #         pickle.dump(self.iteration_time_log, file)
+        #     #with open("prefill_iteration.log", 'w') as file:
+        #     #    file.write("\n".join(self.iteration_time_log, file))
         self.structured_output_manager.clear_backend()
         if self.model_executor:
             self.model_executor.shutdown()
@@ -777,7 +779,7 @@ class EngineCoreProc(EngineCore):
                 logger.info("Waiting for READY message from DP Coordinator...")
 
         self.step_fn = (self.step if self.batch_queue is None else
-                        self.step_with_batch_queue)
+                       self.step_with_batch_queue)
 
         # Mark the startup heap as static so that it's ignored by GC.
         # Reduces pause times of oldest generation collections.

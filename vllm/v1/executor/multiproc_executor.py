@@ -170,8 +170,9 @@ class MultiprocExecutor(Executor):
     ) -> Union[ModelRunnerOutput, Future[ModelRunnerOutput]]:
         non_block = self.max_concurrent_batches > 1
         
-        if non_block:
-            logger.info("non_block")
+        #if non_block:
+            #logger.info("non_block")
+        #     non_block=False
 
         if not self.has_connector:
             # get output only from a single worker (output_rank)

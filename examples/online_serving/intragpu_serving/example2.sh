@@ -263,18 +263,18 @@ main() {
     # =============================================================================
     # Run Benchmark
     # =============================================================================
-    # cd ../../../benchmarks/
-    # vllm bench serve --port 10003 --seed $(date +%s) \
-    #     --model $MODEL \
-    #     --dataset-name random --random-input-len 1024 --random-output-len 256 \
-    #     --num-prompts 1024 --burstiness 100 --request-rate 10 --ignore-eos | tee benchmark.log
+    cd ../../../benchmarks/
+    vllm bench serve --port 10003 --seed $(date +%s) \
+        --model $MODEL \
+        --dataset-name random --random-input-len 1024 --random-output-len 256 \
+        --num-prompts 1024 --burstiness 100 --request-rate 50 --ignore-eos | tee benchmark.log
     
     # echo "Benchmarking done. Cleaning up..."
 
-    vllm bench serve --port 10003 --seed $(date +%s) \
-       --model $MODEL \
-       --dataset-name custom --dataset-path /workspace/lmsys_custom_prompts_10k.jsonl --custom-skip-chat-template \
-       --num-prompts 10000 --burstiness 100 --request-rate 20 | tee benchmark.log    
+    # vllm bench serve --port 10003 --seed $(date +%s) \
+    #    --model $MODEL \
+    #    --dataset-name custom --dataset-path /workspace/lmsys_custom_prompts_10k.jsonl --custom-skip-chat-template \
+    #    --num-prompts 10000 --burstiness 100 --request-rate 20 | tee benchmark.log    
 
     #python3 single_serve.py --port $PROXY_PORT --model $MODEL
     #python3 multi_serve.py --port 10001 --model $MODEL
