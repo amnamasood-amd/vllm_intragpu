@@ -189,6 +189,7 @@ class Scheduler(SchedulerInterface):
         self.finished_req_ids_prefill: list[(int,str)]= []
         self.prefill_event_statuses: list[bool] = []
         self.allocation_counter: int=0
+        self.prev_cu_mask_int: int = 0
         #self.current_scheduled_requests: list[str]=[]
         #self.current_prefill_event=None
 
@@ -390,26 +391,27 @@ class Scheduler(SchedulerInterface):
         structured_output_request_ids, grammar_bitmask = (
                 self.get_grammar_bitmask(self.running,
                                         scheduled_spec_decode_tokens))
-        cu_mask_int=None
-        # if num_scheduled_tokens:
-        #     while True:
-        #         if os.path.exists("cu_mask_int.pkl"):
-        #             try:
-        #                 with open("cu_mask_int.pkl","rb") as file:
-        #                     temp = pickle.load(file)
-        #                 cu_mask_int = temp[0]
-        #                 current_prefill_counter=temp[1]
-        #                 if current_prefill_counter != self.prev_prefill_counter:
-        #                     logger.info("got cu_mask_int %d current_prefill_counter %d", cu_mask_int, current_prefill_counter)
-        #                     self.prev_prefill_counter=current_prefill_counter
-        #                     break
-        #                 #break
-        #             except EOFError:
-        #                 #logger.info("cannot open cu_mask file")
-        #                 continue
-        #         time.sleep(0.0001)
-        # else:
-        #     cu_mask_int=None
+        #cu_mask_int=None
+        if num_scheduled_tokens:
+            while True:
+                if os.path.exists("cu_mask_int.pkl"):
+                    try:
+                        with open("cu_mask_int.pkl","rb") as file:
+                            temp = pickle.load(file)
+                        cu_mask_int = temp[0]
+                        current_prefill_counter=temp[1]
+                        logger.info("got cu_mask_int %d current_prefill_counter %d prev_prefill_counter %d", cu_mask_int, current_prefill_counter, self.prev_prefill_counter)
+                        if current_prefill_counter != self.prev_prefill_counter:
+                            logger.info("got cu_mask_int %d current_prefill_counter %d", cu_mask_int, current_prefill_counter)
+                            self.prev_prefill_counter=current_prefill_counter
+                            break
+                        #break
+                    except EOFError:
+                        logger.info("cannot open cu_mask file")
+                        continue
+                time.sleep(0.0001)
+        else:
+            cu_mask_int=None
 
         scheduler_output = SchedulerOutput(
                 scheduled_new_reqs=new_reqs_data,
@@ -483,7 +485,8 @@ class Scheduler(SchedulerInterface):
         scheduled_resumed_reqs_prefill: list[Request] = []
         num_scheduled_tokens_prefill: dict[str, int] = {}
         allocation_block_data = []
-        initial_running_prefill_len = len(self.running_prefill)
+        #initial_running_prefill_len = len(self.running_prefill)
+        prefill_finished=False
 
         if os.path.exists("event_statuses_0.pkl"):
             try:
@@ -544,6 +547,7 @@ class Scheduler(SchedulerInterface):
                     self.running_prefill.remove(request)
                     #print(type(self.finished_req_ids_prefill))
                     self.finished_req_ids_prefill.append((event,request.request_id))
+                    prefill_finished=True
             except ValueError:
                 pass
                 #logger.info("request_id %s not in just_finished", request.request_id)
@@ -845,15 +849,37 @@ class Scheduler(SchedulerInterface):
         prefill_running = len(self.running_prefill)>0
         if prefill_running:
             #cu_mask_int=32*((8*total_num_scheduled_tokens+31)//32) #TODO: potentially cap at 256
-            cu_mask_int=(total_num_scheduled_tokens+63)//64 #min(9,((total_num_scheduled_tokens+31)//32)) #for no capping, max should be 9
+            #cu_mask_int=(total_num_scheduled_tokens+63)//64 #min(9,((total_num_scheduled_tokens+31)//32)) #for no capping, max should be 9
 
-            # if initial_running_prefill_len != len(self.running_prefill):
+            #if initial_running_prefill_len != len(self.running_prefill):
+            if prefill_finished:
+                cu_mask_int=(total_num_scheduled_tokens+63)//64
+                self.prev_cu_mask_int=cu_mask_int
+                self.prev_prefill_counter+=1
+                logger.info("cu_mask_int %d prefill_counter %d", cu_mask_int, self.prev_prefill_counter)
+                with open("cu_mask_int.pkl","wb") as file:
+                    pickle.dump([cu_mask_int, self.prev_prefill_counter],file)
+            elif len(self.running) - len(self.running_prefill) == 0: #no decode is running, new prefill requests. if decode was running, we should only change cu mask when prefill_finished
+                cu_mask_int=0
+                self.prev_cu_mask_int=0
+                self.prev_prefill_counter+=1
+                logger.info("cu_mask_int %d prefill_counter %d", cu_mask_int, self.prev_prefill_counter)
+                with open("cu_mask_int.pkl","wb") as file:
+                    pickle.dump([cu_mask_int, self.prev_prefill_counter],file)
+            else:
+                cu_mask_int=self.prev_cu_mask_int
+                # if self.prev_prefill_counter==0:
+                #     with open("cu_mask_int.pkl","wb") as file:
+                #         pickle.dump([cu_mask_int, self.prev_prefill_counter],file)
+        else:
+            cu_mask_int=0
+            self.prev_cu_mask_int=0
+            # if prefill_finished:
+            #     self.prev_cu_mask_int=cu_mask_int
             #     self.prev_prefill_counter+=1
             #     logger.info("cu_mask_int %d prefill_counter %d", cu_mask_int, self.prev_prefill_counter)
             #     with open("cu_mask_int.pkl","wb") as file:
             #         pickle.dump([cu_mask_int, self.prev_prefill_counter],file)
-        else:
-            cu_mask_int=None
         
         #cu_mask_int=(total_num_scheduled_tokens+31)//32
         #logger.info("cu_mask_int %d", cu_mask_int)
