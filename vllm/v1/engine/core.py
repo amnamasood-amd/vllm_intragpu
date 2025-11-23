@@ -510,24 +510,29 @@ class EngineCore:
             #     current_prefill_event_status = self.model_executor.check_prefill_status()
             #     self.scheduler.update_after_prefill_status(current_prefill_event_status)
             scheduler_output = self.scheduler.prefill_schedule()
-            if scheduler_output.num_scheduled_tokens:    
-                #logger.info("starting model")
-                #start_time=time.monotonic()
-                model_output = self.execute_model_with_error_logging(
+            model_output = self.execute_model_with_error_logging(
                     self.model_executor.execute_model,  # type: ignore
                     scheduler_output)
-                #end_time=time.monotonic()
-                #iteration_time=end_time-start_time
-                #self.iteration_time_log.append([str(scheduler_output.total_num_scheduled_tokens),str(scheduler_output.cu_mask_int),str(iteration_time)])
-                #logger.info("finished model, getting outputs time %f", iteration_time)
-                engine_core_outputs = self.scheduler.prefill_update_from_output(
+            engine_core_outputs = self.scheduler.prefill_update_from_output(
                     scheduler_output, model_output)  # type: ignore
-                #print(engine_core_outputs)
-            elif scheduler_output.finished_req_ids:
-                engine_core_outputs = self.scheduler.prefill_update_from_output(
-                    scheduler_output, EMPTY_MODEL_RUNNER_OUTPUT)
-            else:
-                return {}, False
+            # if scheduler_output.num_scheduled_tokens:    
+            #     #logger.info("starting model")
+            #     #start_time=time.monotonic()
+            #     model_output = self.execute_model_with_error_logging(
+            #         self.model_executor.execute_model,  # type: ignore
+            #         scheduler_output)
+            #     #end_time=time.monotonic()
+            #     #iteration_time=end_time-start_time
+            #     #self.iteration_time_log.append([str(scheduler_output.total_num_scheduled_tokens),str(scheduler_output.cu_mask_int),str(iteration_time)])
+            #     #logger.info("finished model, getting outputs time %f", iteration_time)
+            #     engine_core_outputs = self.scheduler.prefill_update_from_output(
+            #         scheduler_output, model_output)  # type: ignore
+            #     #print(engine_core_outputs)
+            # elif scheduler_output.finished_req_ids:
+            #     engine_core_outputs = self.scheduler.prefill_update_from_output(
+            #         scheduler_output, EMPTY_MODEL_RUNNER_OUTPUT)
+            # else:
+            #     return {}, False
             
         return (engine_core_outputs,
                 scheduler_output.total_num_scheduled_tokens > 0)

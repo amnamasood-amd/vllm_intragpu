@@ -404,14 +404,16 @@ class GPUModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
             #     #self.streams.append(regular_stream())
             #self.streams.append(priority_stream_nonblocking())
             self.current_prefill_status_counter=0
-            self.current_prefill_event_counter=0
+            #self.current_prefill_event_counter=0
             self.prefill_events: list[torch.cuda.Event]=[]
             self.prefill_event_statuses: list[bool]=[]
-            if self.rank==0:
-                prefill_status_thread = threading.Thread(target=self.check_prefill_status,daemon=True)
-                prefill_status_thread.start()
+            #if self.rank==0:
+                #prefill_status_thread = threading.Thread(target=self.check_prefill_status,daemon=True)
+                #prefill_status_thread.start()
             
             self.record_iteration=3
+        
+        self.current_prefill_event_counter=0
         self.def_stream=torch.cuda.default_stream()
         self.prev_cu_mask_int: Optional[int] = None
         
@@ -1644,11 +1646,17 @@ class GPUModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
                 self.prev_event=sync_event
                 current_stream.wait_event(other_event)
             else:
-                if self.prev_event is not None:
-                    current_stream.wait_event(self.prev_event)
-                self.prev_event=sync_event
-                current_stream.wait_event(other_event)
-                
+                # if self.prev_event is not None:
+                #     current_stream.wait_event(self.prev_event)
+                # self.prev_event=sync_event
+                # current_stream.wait_event(other_event)
+                current_stream.synchronize()
+                if self.current_prefill_status_counter < self.current_prefill_event_counter:
+                    self.prefill_event_statuses.append(True)
+                    if self.rank==0:
+                        with open("event_statuses_"+str(self.rank)+".pkl",'wb') as file:
+                            pickle.dump(self.prefill_event_statuses,file)
+                    self.current_prefill_status_counter+=1
             
             #current_stream.wait_event(other_event)
 
@@ -1685,6 +1693,9 @@ class GPUModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
 
                 return self.kv_connector_no_forward(scheduler_output,
                                                     self.vllm_config)
+
+            #only increment if there are scheduled tokens
+            self.current_prefill_event_counter+=1
 
             if self.cache_config.kv_sharing_fast_prefill:
                 assert not self.input_batch.num_prompt_logprobs, (
