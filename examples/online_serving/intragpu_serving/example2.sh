@@ -181,7 +181,7 @@ main() {
         --async_scheduling \
         --no-enable-prefix-caching \
         --kv-transfer-config \
-        "{\"kv_connector\":\"IntraGPUConnector\",\"kv_role\":\"kv_producer\",\"kv_buffer_size\":\"8e9\",\"kv_port\":\"$kv_port\"}" > decode.log &
+        "{\"kv_connector\":\"IntraGPUConnector\",\"kv_role\":\"kv_producer\",\"kv_buffer_size\":\"8e9\",\"kv_port\":\"$kv_port\"}" > decode.log 2> decode_debug.log &
         PIDS+=($!)
         #--enforce-eager \
         #--max-num-seqs 256 \
@@ -225,7 +225,7 @@ main() {
         --gpu-memory-utilization 0.80 \
         --no-enable-prefix-caching \
         --kv-transfer-config \
-        "{\"kv_connector\":\"IntraGPUConnector\",\"kv_role\":\"kv_consumer\",\"kv_buffer_size\":\"1e1\",\"kv_port\":\"$kv_port\"}" > prefill.log &
+        "{\"kv_connector\":\"IntraGPUConnector\",\"kv_role\":\"kv_consumer\",\"kv_buffer_size\":\"1e1\",\"kv_port\":\"$kv_port\"}" > prefill.log 2> prefill_debug.log &
         PIDS+=($!)
         #--max-num-seqs 256 \
         #--compilation-config '{"cudagraph_mode":"FULL"}' \
@@ -275,7 +275,7 @@ main() {
     vllm bench serve --port 10003 --seed $(date +%s) \
        --model $MODEL \
        --dataset-name custom --dataset-path /workspace/lmsys_custom_prompts_10k.jsonl --custom-skip-chat-template \
-       --num-prompts 10000 --burstiness 100 --request-rate 30 | tee benchmark.log    
+       --num-prompts 10000 --burstiness 100 --request-rate 20 --goodput tpot:100 --save-detailed | tee benchmark.log    
 
     #python3 single_serve.py --port $PROXY_PORT --model $MODEL
     #python3 multi_serve.py --port 10001 --model $MODEL
