@@ -174,8 +174,8 @@ main() {
         --seed 1024 \
         --dtype float16 \
         --max-num-seqs 512 \
-        --max-model-len 16000 \
-        --max-num-batched-tokens 12500 \
+        --max-model-len 131072 \
+        --max-num-batched-tokens 131072 \
         --trust-remote-code \
         --gpu-memory-utilization 0.80 \
         --async_scheduling \
@@ -218,9 +218,9 @@ main() {
         --tensor-parallel-size 8 \
         --seed 1024 \
         --dtype float16 \
-        --max-model-len 16000 \
-        --max-num-batched-tokens 12500 \
-        --max-num-seqs 64 \
+        --max-model-len 131072 \
+        --max-num-batched-tokens 131072 \
+        --max-num-seqs 1 \
         --trust-remote-code \
         --gpu-memory-utilization 0.80 \
         --no-enable-prefix-caching \
@@ -268,8 +268,8 @@ main() {
 
     vllm bench serve --port 10003 --seed $(date +%s) \
        --model $MODEL \
-       --dataset-name custom --dataset-path /workspace/lmsys_custom_prompts_10k.jsonl --custom-skip-chat-template \
-       --num-prompts 10000 --burstiness 500 --request-rate 20 --goodput tpot:100 --save-detailed | tee benchmark_lmsys.log    
+       --dataset-name custom --dataset-path /workspace/loogle_custom_prompts_516_trimmed.jsonl --custom-skip-chat-template \
+       --num-prompts 100 --burstiness 500 --request-rate 1 --goodput tpot:100 --save-detailed | tee benchmark_lmsys.log    
 
     #python3 single_serve.py --port $PROXY_PORT --model $MODEL
     #python3 multi_serve.py --port 10001 --model $MODEL
