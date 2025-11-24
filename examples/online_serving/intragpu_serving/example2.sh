@@ -219,7 +219,7 @@ main() {
         --seed 1024 \
         --dtype float16 \
         --max-model-len 131072 \
-        --max-num-batched-tokens 20000 \
+        --max-num-batched-tokens 12500 \
         --max-num-seqs 64 \
         --trust-remote-code \
         --gpu-memory-utilization 0.80 \
@@ -269,7 +269,7 @@ main() {
     vllm bench serve --port 10003 --seed $(date +%s) \
        --model $MODEL \
        --dataset-name custom --dataset-path /workspace/lmsys_custom_prompts_10k.jsonl --custom-skip-chat-template \
-       --num-prompts 1000 --burstiness 500 --request-rate 30 --goodput tpot:100 --save-detailed | tee benchmark_lmsys.log    
+       --num-prompts 10000 --burstiness 500 --request-rate 1 --goodput tpot:100 --save-detailed | tee benchmark_lmsys.log    
 
     #python3 single_serve.py --port $PROXY_PORT --model $MODEL
     #python3 multi_serve.py --port 10001 --model $MODEL

@@ -354,22 +354,22 @@ class GPUModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
         self.streams: list[torch.cuda.Stream] = []
         if self.kv_transfer_config.kv_role == "kv_producer":
             self.streams.append(torch.cuda.Stream())
-            # cu_mask_array=[128, 160]
-            # for i in range(len(cu_mask_array)):
-            #     cu_mask_int=(1<<cu_mask_array[i])-1
-            #     cu_mask=int_to_maskarr(cu_mask_int, self.mask_words)
-            #     self.streams.append(stream_with_cu_mask(cu_mask))
+            cu_mask_array=[128, 160]
+            for i in range(len(cu_mask_array)):
+                cu_mask_int=(1<<cu_mask_array[i])-1
+                cu_mask=int_to_maskarr(cu_mask_int, self.mask_words)
+                self.streams.append(stream_with_cu_mask(cu_mask))
             self.record_iteration=512
         else:
             
             self.streams.append(torch.cuda.Stream())
     
-            # cu_mask_array=[128,160]
-            # for i in range(len(cu_mask_array)):
-            #     decode_mask_int=(1<<cu_mask_array[i])-1
-            #     cu_mask_int=((1 << self.n_cu) - 1) ^ decode_mask_int
-            #     cu_mask=int_to_maskarr(cu_mask_int, self.mask_words)
-            #     self.streams.append(stream_with_cu_mask(cu_mask))
+            cu_mask_array=[128,160]
+            for i in range(len(cu_mask_array)):
+                decode_mask_int=(1<<cu_mask_array[i])-1
+                cu_mask_int=((1 << self.n_cu) - 1) ^ decode_mask_int
+                cu_mask=int_to_maskarr(cu_mask_int, self.mask_words)
+                self.streams.append(stream_with_cu_mask(cu_mask))
             
             self.current_prefill_status_counter=0
             #self.current_prefill_event_counter=0
@@ -1558,20 +1558,31 @@ class GPUModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
     def check_prefill_status(
         self,
     ):
-        logger.info("starting check_prefill_status")
-        while True:
-            if self.current_prefill_status_counter < len(self.prefill_events):
-                #logger.info("checking counter status %d",self.current_prefill_status_counter)
-                prefill_event_status = self.prefill_events[self.current_prefill_status_counter].query()
-                if prefill_event_status is True:
-                    #logger.info("prefill event success")
-                    self.prefill_event_statuses.append(prefill_event_status)
-                    self.current_prefill_event_counter+=1
-                    with open("event_statuses_"+str(self.rank)+".pkl",'wb') as file:
-                        pickle.dump(self.prefill_event_statuses,file)
-                    self.current_prefill_status_counter+=1
-            time.sleep(0.0001)
-        #return prefill_event_status
+        # logger.info("starting check_prefill_status")
+        # while True:
+        #     if self.current_prefill_status_counter < len(self.prefill_events):
+        #         #logger.info("checking counter status %d",self.current_prefill_status_counter)
+        #         prefill_event_status = self.prefill_events[self.current_prefill_status_counter].query()
+        #         if prefill_event_status is True:
+        #             #logger.info("prefill event success")
+        #             self.prefill_event_statuses.append(prefill_event_status)
+        #             self.current_prefill_event_counter+=1
+        #             with open("event_statuses_"+str(self.rank)+".pkl",'wb') as file:
+        #                 pickle.dump(self.prefill_event_statuses,file)
+        #             self.current_prefill_status_counter+=1
+        #     time.sleep(0.0001)
+        
+        if self.current_prefill_status_counter < self.current_prefill_event_counter:
+            self.prev_stream.synchronize()
+            self.prefill_event_statuses.append(True)
+            if self.rank==0:
+                with open("event_statuses_"+str(self.rank)+".pkl",'wb') as file:
+                    pickle.dump(self.prefill_event_statuses,file)
+            self.current_prefill_status_counter+=1
+            return True
+        return False
+
+        
 
     @torch.inference_mode()
     def execute_model(
@@ -1580,13 +1591,13 @@ class GPUModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
         intermediate_tensors: Optional[IntermediateTensors] = None,
     ) -> Union[ModelRunnerOutput, IntermediateTensors]:
         
-        # if scheduler_output.cu_mask_int is not None:
-        #     cu_mask_int=min(2,scheduler_output.cu_mask_int)
-        #     current_stream=self.streams[cu_mask_int]
-        # else:
-        #     #logger.info("cu_mask_int is none")
-        #     current_stream=self.streams[0]
-        current_stream=self.streams[0]
+        if scheduler_output.cu_mask_int is not None:
+            cu_mask_int=min(2,scheduler_output.cu_mask_int)
+            current_stream=self.streams[cu_mask_int]
+        else:
+            #logger.info("cu_mask_int is none")
+            current_stream=self.streams[0]
+        #current_stream=self.streams[0]
         other_event=torch.cuda.Event()
         sync_event=torch.cuda.Event()
         # if self.kv_transfer_config.kv_role == "kv_producer":
@@ -1609,15 +1620,17 @@ class GPUModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
                 #     current_stream.wait_event(self.prev_event)
                 # self.prev_event=sync_event
                 # current_stream.wait_event(other_event)
-                current_stream.synchronize()
-                # self.prev_stream.synchronize()
-                # self.prev_stream=current_stream
+                #current_stream.synchronize()
+                
+                
                 if self.current_prefill_status_counter < self.current_prefill_event_counter:
+                    self.prev_stream.synchronize()
                     self.prefill_event_statuses.append(True)
                     if self.rank==0:
                         with open("event_statuses_"+str(self.rank)+".pkl",'wb') as file:
                             pickle.dump(self.prefill_event_statuses,file)
                     self.current_prefill_status_counter+=1
+                self.prev_stream=current_stream
             
             #current_stream.wait_event(other_event)
 

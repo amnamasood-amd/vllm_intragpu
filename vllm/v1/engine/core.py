@@ -438,6 +438,8 @@ class EngineCore:
         was executed.
         """
         if not self.scheduler.has_requests():
+            if self.scheduler.connector.transfer_config.kv_role == "kv_consumer":
+                self.model_executor.check_prefill_status()
             return {}, False
         
 
