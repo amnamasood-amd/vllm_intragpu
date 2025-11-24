@@ -353,56 +353,24 @@ class GPUModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
         self.mask_words=(self.n_cu + 31) // 32
         self.streams: list[torch.cuda.Stream] = []
         if self.kv_transfer_config.kv_role == "kv_producer":
-            #logger.info("assigning streams")
-            #self.streams.append(torch.cuda.Stream(priority=-1))
-            #self.streams.append(regular_stream())
             self.streams.append(torch.cuda.Stream())
-            #check_stream_flags(self.streams[0])
-            #self.streams.append(priority_stream_nonblocking())
-            #self.streams.append(torch.cuda.Stream())
-            #for i in range(9):
-            #    self.streams.append(priority_stream_nonblocking())
-            #check_stream_flags(self.streams[1])
-            #self.streams.append(regular_stream_nonblocking())
-            #self.streams.append(regular_stream_nonblocking())
-            # cu_mask_int=(1<<320)-1
-            # cu_mask=int_to_maskarr(cu_mask_int, self.mask_words)
-            # self.streams.append(stream_with_cu_mask(cu_mask))
-            # cu_mask_int=(1<<256)-1
-            # cu_mask=int_to_maskarr(cu_mask_int, self.mask_words)
-            # self.streams.append(stream_with_cu_mask(cu_mask))
             # cu_mask_array=[128, 160]
             # for i in range(len(cu_mask_array)):
             #     cu_mask_int=(1<<cu_mask_array[i])-1
             #     cu_mask=int_to_maskarr(cu_mask_int, self.mask_words)
             #     self.streams.append(stream_with_cu_mask(cu_mask))
-            #self.streams.append(priority_stream_nonblocking())
-                #self.streams.append(torch.cuda.Stream())
             self.record_iteration=512
         else:
-            #logger.info("assigning complementary streams")            
-            #self.streams.append(torch.cuda.Stream()) #giving a higher number for lower priority
-            #check_stream_flags(self.streams[0])
-            #self.streams.append(torch.cuda.Stream())
             
             self.streams.append(torch.cuda.Stream())
-            #self.streams.append(regular_stream())
-            #self.streams.append(regular_stream_nonblocking())
-            #for i in range(9):
-            #   self.streams.append(priority_stream_nonblocking())
-            #self.streams.append(priority_stream_nonblocking())
-            #check_stream_flags(self.streams[1])
-            # cu_mask_int=(1<<320)-1
-            # cu_mask=int_to_maskarr(cu_mask_int, self.mask_words)
-            # self.streams.append(stream_with_cu_mask(cu_mask))
+    
             # cu_mask_array=[128,160]
             # for i in range(len(cu_mask_array)):
             #     decode_mask_int=(1<<cu_mask_array[i])-1
             #     cu_mask_int=((1 << self.n_cu) - 1) ^ decode_mask_int
             #     cu_mask=int_to_maskarr(cu_mask_int, self.mask_words)
             #     self.streams.append(stream_with_cu_mask(cu_mask))
-            #     #self.streams.append(regular_stream())
-            #self.streams.append(priority_stream_nonblocking())
+            
             self.current_prefill_status_counter=0
             #self.current_prefill_event_counter=0
             self.prefill_events: list[torch.cuda.Event]=[]
@@ -416,6 +384,7 @@ class GPUModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
         self.current_prefill_event_counter=0
         self.def_stream=torch.cuda.default_stream()
         self.prev_cu_mask_int: Optional[int] = None
+        self.prev_stream = self.streams[0]
         
         #self.timing_events=[]
         #for i in range(8):
@@ -1614,16 +1583,6 @@ class GPUModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
         # if scheduler_output.cu_mask_int is not None:
         #     cu_mask_int=min(2,scheduler_output.cu_mask_int)
         #     current_stream=self.streams[cu_mask_int]
-        #     # if scheduler_output.cu_mask_int < 5:
-        #     #     #cu_mask_int=min(4,scheduler_output.cu_mask_int)
-        #     #     current_stream=self.streams[scheduler_output.cu_mask_int]
-        #     #     #current_stream=self.streams[0]
-        #     #     #sync_event=torch.cuda.Event()
-        #     # else:
-        #     #     scheduler_output.cu_mask_int=None
-        #     #     current_stream=self.streams[0]
-        #     # #logger.info("cu_mask_int %d", cu_mask_int)
-        #     # #current_stream=self.streams[0]
         # else:
         #     #logger.info("cu_mask_int is none")
         #     current_stream=self.streams[0]
@@ -1651,6 +1610,8 @@ class GPUModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
                 # self.prev_event=sync_event
                 # current_stream.wait_event(other_event)
                 current_stream.synchronize()
+                # self.prev_stream.synchronize()
+                # self.prev_stream=current_stream
                 if self.current_prefill_status_counter < self.current_prefill_event_counter:
                     self.prefill_event_statuses.append(True)
                     if self.rank==0:
