@@ -1591,13 +1591,13 @@ class GPUModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
         intermediate_tensors: Optional[IntermediateTensors] = None,
     ) -> Union[ModelRunnerOutput, IntermediateTensors]:
         
-        if scheduler_output.cu_mask_int is not None:
-            cu_mask_int=min(2,scheduler_output.cu_mask_int)
-            current_stream=self.streams[cu_mask_int]
-        else:
-            #logger.info("cu_mask_int is none")
-            current_stream=self.streams[0]
-        #current_stream=self.streams[0]
+        # if scheduler_output.cu_mask_int is not None:
+        #     cu_mask_int=min(2,scheduler_output.cu_mask_int)
+        #     current_stream=self.streams[cu_mask_int]
+        # else:
+        #     #logger.info("cu_mask_int is none")
+        #     current_stream=self.streams[0]
+        current_stream=self.streams[0]
         other_event=torch.cuda.Event()
         sync_event=torch.cuda.Event()
         # if self.kv_transfer_config.kv_role == "kv_producer":
