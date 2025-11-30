@@ -269,7 +269,7 @@ main() {
     vllm bench serve --port 10003 --seed $(date +%s) \
        --model $MODEL \
        --dataset-name custom --dataset-path /workspace/lmsys_custom_prompts_10k.jsonl --custom-skip-chat-template \
-       --num-prompts 10000 --burstiness 500 --request-rate 1 --goodput tpot:100 --save-detailed | tee benchmark_lmsys.log    
+       --num-prompts 10000 --burstiness 500 --request-rate 20 --goodput tpot:100 --save-detailed | tee benchmark_lmsys.log    
 
     #python3 single_serve.py --port $PROXY_PORT --model $MODEL
     #python3 multi_serve.py --port 10001 --model $MODEL
