@@ -511,7 +511,31 @@ class EngineCore:
             #     logger.info("checking status of prefill counter %d", self.scheduler.current_prefill_event_counter)
             #     current_prefill_event_status = self.model_executor.check_prefill_status()
             #     self.scheduler.update_after_prefill_status(current_prefill_event_status)
+            
             scheduler_output = self.scheduler.prefill_schedule()
+            # if scheduler_output.num_scheduled_tokens:
+            #     while True:
+            #         if os.path.exists("cu_mask_int.pkl"):
+            #             try:
+            #                 with open("cu_mask_int.pkl","rb") as file:
+            #                     temp = pickle.load(file)
+            #                 cu_mask_int = temp[0]
+            #                 current_prefill_counter=temp[1]
+            #                 logger.info("got cu_mask_int %d current_prefill_counter %d prev_prefill_counter %d", cu_mask_int, current_prefill_counter, self.scheduler.prev_prefill_counter)
+            #                 if current_prefill_counter != self.scheduler.prev_prefill_counter:
+            #                     self.scheduler.prev_prefill_counter=current_prefill_counter
+            #                     scheduler_output.cu_mask_int=cu_mask_int
+            #                     break
+            #                 else:
+            #                     self.model_executor.check_prefill_status()
+            #                 #break
+            #             except EOFError:
+            #                 #logger.info("cannot open cu_mask file")
+            #                 continue
+            #         time.sleep(0.0001)
+
+
+
             model_output = self.execute_model_with_error_logging(
                     self.model_executor.execute_model,  # type: ignore
                     scheduler_output)
