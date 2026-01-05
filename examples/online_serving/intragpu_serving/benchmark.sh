@@ -259,16 +259,15 @@ main() {
     # cd ../../../benchmarks/
     results_folder=/workspace/datasets/miscope
 
-    tag=intragpu-both_torch-llama-lmsys-20k_64_512-noasync
+    tag=intragpu-both_torch-llama-lmsys-20k_64_512-testlogs
     input_len=1024
-    for qps in 20 10 5 1; do
+    for qps in 25; do
     #python3 /workspace/miscope/miscope.py \
     #--gpus=0,4 \
     #--prefix="/workspace/datasets/$tag-qps$qps" \
     #--cmd="
 	vllm bench serve --port 10003 \
           --model $MODEL \
-          --seed 1024 \
           --goodput tpot:100 \
           --dataset-name custom \
           --dataset-path /workspace/lmsys_custom_prompts_10k.jsonl \
@@ -285,18 +284,18 @@ main() {
           rm -rf /workspace/vllm_intragpu/examples/online_serving/intragpu_serving/*pkl
           sleep 2
           # Run convert_to_log.py
-        # python3 /workspace/vllm_intragpu/examples/online_serving/intragpu_serving/convert_to_log.py
+        python3 /workspace/vllm_intragpu/examples/online_serving/intragpu_serving/convert_to_log.py
 
-        # # Base directory
-        # BASE_DIR="/workspace/vllm_intragpu/examples/online_serving/intragpu_serving"
+        # Base directory
+        BASE_DIR="/workspace/vllm_intragpu/examples/online_serving/intragpu_serving"
 
-        # # Rename decode log
-        # mv "${BASE_DIR}/decode_iter_data.log" \
-        # "${BASE_DIR}/decode_iter_data_${tag}_${qps}.log"
+        # Rename decode log
+        mv "${BASE_DIR}/decode_iter_data.log" \
+        "${BASE_DIR}/decode_iter_data_${tag}_${qps}.log"
 
-        # # Rename prefill log
-        # mv "${BASE_DIR}/prefill_iter_data.log" \
-        # "${BASE_DIR}/prefill_iter_data_${tag}_${qps}.log"
+        # Rename prefill log
+        mv "${BASE_DIR}/prefill_iter_data.log" \
+        "${BASE_DIR}/prefill_iter_data_${tag}_${qps}.log"
 
         sleep 5
 

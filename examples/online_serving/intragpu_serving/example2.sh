@@ -21,6 +21,7 @@
 # =============================================================================
 
 # Configuration - can be overridden via environment variables
+export HF_TOKEN="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"
 MODEL=${MODEL:-meta-llama/Llama-3.1-70B-Instruct}
 TIMEOUT_SECONDS=${TIMEOUT_SECONDS:-1200}
 PROXY_PORT=${PROXY_PORT:-60002}
@@ -266,10 +267,10 @@ main() {
     
     # echo "Benchmarking done. Cleaning up..."
 
-    vllm bench serve --port 10003 --seed $(date +%s) \
+    vllm bench serve --port 10003 --seed 1024 \
        --model $MODEL \
        --dataset-name custom --dataset-path /workspace/lmsys_custom_prompts_10k.jsonl --custom-skip-chat-template \
-       --num-prompts 10000 --burstiness 500 --request-rate 30 --goodput tpot:100 --save-result --save-detailed --result-dir /workspace/vllm_intragpu/examples/online_serving/intragpu_serving/results --result-filename llama_lmsys_qps30_bothmasked_noestimate.json | tee benchmark_lmsys.log    
+       --num-prompts 10000 --burstiness 500 --request-rate 25 --goodput tpot:100 --save-result --save-detailed --result-dir /workspace/vllm_intragpu/examples/online_serving/intragpu_serving/results --result-filename llama_lmsys_qps25_bothtorch_noestimate_baseline_withburst_noendpoint.json | tee benchmark_lmsys.log    
 
     #python3 single_serve.py --port $PROXY_PORT --model $MODEL
     #python3 multi_serve.py --port 10001 --model $MODEL
