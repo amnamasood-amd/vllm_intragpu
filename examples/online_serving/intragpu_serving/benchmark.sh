@@ -181,7 +181,7 @@ main() {
         --dtype float16 \
 	--async_scheduling \
         --max-model-len 131072 \
-	    --max-num-batched-tokens 512 \
+	    --max-num-seqs 512 \
         --gpu-memory-utilization 0.8 \
         --trust-remote-code \
         --no-enable-prefix-caching \
@@ -283,25 +283,8 @@ main() {
           rm -rf /workspace/vllm_intragpu/examples/online_serving/intragpu_serving/req_block_data/*
           rm -rf /workspace/vllm_intragpu/examples/online_serving/intragpu_serving/*pkl
           sleep 2
-          # Run convert_to_log.py
-        python3 /workspace/vllm_intragpu/examples/online_serving/intragpu_serving/convert_to_log.py
+          
 
-        # Base directory
-        BASE_DIR="/workspace/vllm_intragpu/examples/online_serving/intragpu_serving"
-
-        # Rename decode log
-        mv "${BASE_DIR}/decode_iter_data.log" \
-        "${BASE_DIR}/decode_iter_data_${tag}_${qps}.log"
-
-        # Rename prefill log
-        mv "${BASE_DIR}/prefill_iter_data.log" \
-        "${BASE_DIR}/prefill_iter_data_${tag}_${qps}.log"
-
-        sleep 5
-
-        #   --random-input-len $input_len \
-        #   --random-output-len 256 \
-        # --ignore-eos \
     done
     # echo "Benchmarking done. Cleaning up..."
 
