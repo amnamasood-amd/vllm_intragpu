@@ -175,13 +175,13 @@ main() {
         --dtype float16 \
         --max-model-len 131072 \
         --max-num-seqs 512 \
-        --max-num-batched-tokens 20000 \
+        --max-num-batched-tokens 13000 \
         --trust-remote-code \
         --gpu-memory-utilization 0.80 \
         --async_scheduling \
         --no-enable-prefix-caching \
         --kv-transfer-config \
-        "{\"kv_connector\":\"IntraGPUConnector\",\"kv_role\":\"kv_producer\",\"kv_buffer_size\":\"8e9\",\"kv_port\":\"$kv_port\"}" > decode.log 2> decode_debug.log &
+        "{\"kv_connector\":\"IntraGPUConnector\",\"kv_role\":\"kv_producer\",\"kv_buffer_size\":\"8e9\",\"kv_port\":\"$kv_port\"}" > decode.log &
         PIDS+=($!)
         #--enforce-eager \
         #--max-num-seqs 512 \
@@ -219,13 +219,13 @@ main() {
         --seed 1024 \
         --dtype float16 \
         --max-model-len 131072 \
-        --max-num-batched-tokens 20000 \
+        --max-num-batched-tokens 13000 \
         --max-num-seqs 64 \
         --trust-remote-code \
         --gpu-memory-utilization 0.80 \
         --no-enable-prefix-caching \
         --kv-transfer-config \
-        "{\"kv_connector\":\"IntraGPUConnector\",\"kv_role\":\"kv_consumer\",\"kv_buffer_size\":\"1e1\",\"kv_port\":\"$kv_port\"}" > prefill.log 2> prefill_debug.log &
+        "{\"kv_connector\":\"IntraGPUConnector\",\"kv_role\":\"kv_consumer\",\"kv_buffer_size\":\"1e1\",\"kv_port\":\"$kv_port\"}" > prefill.log &
         PIDS+=($!)
         #--max-num-seqs 256 \
         #--compilation-config '{"cudagraph_mode":"FULL"}' \
@@ -269,7 +269,7 @@ main() {
     vllm bench serve --port 10003 --seed $(date +%s) \
        --model $MODEL \
        --dataset-name custom --dataset-path /workspace/lmsys_custom_prompts_10k.jsonl --custom-skip-chat-template \
-       --num-prompts 10000 --burstiness 500 --request-rate 30 --goodput tpot:100 --save-result --save-detailed --result-dir /workspace/vllm_intragpu/examples/online_serving/intragpu_serving/results --result-filename llama_lmsys_qps30_bothmasked_noestimate.json | tee benchmark_lmsys.log    
+       --num-prompts 10000 --burstiness 500 --request-rate 25 --goodput tpot:100 --save-result --save-detailed --result-dir /workspace/results --result-filename llama_lmsys_qps25_bothtorch_test.json | tee benchmark_lmsys.log    
 
     #python3 single_serve.py --port $PROXY_PORT --model $MODEL
     #python3 multi_serve.py --port 10001 --model $MODEL
