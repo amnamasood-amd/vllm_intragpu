@@ -176,6 +176,9 @@ class SchedulerOutput:
     # KV Cache Connector metadata.
     kv_connector_metadata: Optional[KVConnectorMetadata] = None
 
+    running: Optional[int] = None
+    waiting: Optional[int] = None
+
     
 
     @classmethod
@@ -281,6 +284,8 @@ class SchedulerOutputPrefill:
     # This can be used for cascade attention.
     num_common_prefix_blocks: list[int]
     finished_req_ids: set[str]
+    running: Optional[int] = None
+    waiting: Optional[int] = None
 
 
     @classmethod

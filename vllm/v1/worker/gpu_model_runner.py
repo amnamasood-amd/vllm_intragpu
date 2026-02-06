@@ -355,21 +355,21 @@ class GPUModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
         if self.kv_transfer_config.kv_role == "kv_producer":
             self.streams.append(torch.cuda.Stream())
             cu_mask_array=[128, 160]
-            # for i in range(len(cu_mask_array)):
-            #     cu_mask_int=(1<<cu_mask_array[i])-1
-            #     cu_mask=int_to_maskarr(cu_mask_int, self.mask_words)
-            #     self.streams.append(stream_with_cu_mask(cu_mask))
-            # self.record_iteration=512
+            for i in range(len(cu_mask_array)):
+                cu_mask_int=(1<<cu_mask_array[i])-1
+                cu_mask=int_to_maskarr(cu_mask_int, self.mask_words)
+                self.streams.append(stream_with_cu_mask(cu_mask))
+            self.record_iteration=512
         else:
             
             self.streams.append(torch.cuda.Stream())
     
-            # cu_mask_array=[128,160]
-            # for i in range(len(cu_mask_array)):
-            #     decode_mask_int=(1<<cu_mask_array[i])-1
-            #     cu_mask_int=((1 << self.n_cu) - 1) ^ decode_mask_int
-            #     cu_mask=int_to_maskarr(cu_mask_int, self.mask_words)
-            #     self.streams.append(stream_with_cu_mask(cu_mask))
+            cu_mask_array=[128,160]
+            for i in range(len(cu_mask_array)):
+                decode_mask_int=(1<<cu_mask_array[i])-1
+                cu_mask_int=((1 << self.n_cu) - 1) ^ decode_mask_int
+                cu_mask=int_to_maskarr(cu_mask_int, self.mask_words)
+                self.streams.append(stream_with_cu_mask(cu_mask))
             
             self.current_prefill_status_counter=0
             #self.current_prefill_event_counter=0
@@ -422,6 +422,28 @@ class GPUModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
         #             except EOFError:
         #                 logger.info("cannot open kv cache handles")
         # self.prev_sync_event_counter=0
+        # timing
+        log_dir = os.environ.get("VLLM_LOG_DIR", "/workspace/vllm_intragpu/")
+
+        rank = getattr(self, "rank", None)
+        if rank is None:
+            rank = int(os.environ.get("RANK", "0"))
+        print("rank:",rank)
+        fname = f"iteration_rank{rank}_pid{os.getpid()}.jsonl"
+
+        self.iteration_log, self._iteration_listener = setup_async_jsonl_logger(
+            name=f"vllm.iteration.{rank}",
+            log_dir=log_dir,
+            filename=fname,
+            queue_maxsize=100000,  
+        )
+        self.prefill_start_time = torch.cuda.Event(enable_timing=True)
+        self.prefill_end_time = torch.cuda.Event(enable_timing=True)
+        self.decode_start_time = torch.cuda.Event(enable_timing=True)
+        self.decode_end_time = torch.cuda.Event(enable_timing=True)
+        self.is_prefilling = False
+        self.prefill_iteration_time = 0
+        self.decode_iteration_time = 0
 
     def _make_buffer(self, *args, dtype: torch.dtype) -> CpuGpuBuffer:
         return CpuGpuBuffer(*args,
@@ -1617,13 +1639,13 @@ class GPUModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
         intermediate_tensors: Optional[IntermediateTensors] = None,
     ) -> Union[ModelRunnerOutput, IntermediateTensors]:
         
-        # if scheduler_output.cu_mask_int is not None:
-        #     cu_mask_int=min(2,scheduler_output.cu_mask_int)
-        #     current_stream=self.streams[cu_mask_int]
-        # else:
-        #     #logger.info("cu_mask_int is none")
-        #     current_stream=self.streams[0]
-        current_stream=self.streams[0]
+        if scheduler_output.cu_mask_int is not None:
+            cu_mask_int=min(2,scheduler_output.cu_mask_int)
+            current_stream=self.streams[cu_mask_int]
+        else:
+            #logger.info("cu_mask_int is none")
+            current_stream=self.streams[0]
+        # current_stream=self.streams[0]
         other_event=torch.cuda.Event()
         sync_event=torch.cuda.Event()
         # if self.kv_transfer_config.kv_role == "kv_producer":
@@ -1668,6 +1690,19 @@ class GPUModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
             # #torch.cuda.set_stream(self.model_stream)
             
             self._update_states(scheduler_output)
+            # timing
+            if self.kv_transfer_config.kv_role == "kv_producer":
+                self.decode_start_time.record(stream=current_stream)
+                scheduled_tokens= int(sum(scheduler_output.num_scheduled_tokens.values()))
+                scheduled_running_req=int(scheduler_output.running)
+                scheduled_waiting_req=int(scheduler_output.waiting)
+                cu_mask_int= str(scheduler_output.cu_mask_int)
+            else:
+                self.prefill_start_time.record(stream=current_stream)
+                scheduled_tokens= int(sum(scheduler_output.num_scheduled_tokens.values()))
+                scheduled_running_req=int(scheduler_output.running)
+                scheduled_waiting_req=int(scheduler_output.waiting)
+                cu_mask_int= str(scheduler_output.cu_mask_int)
 
             #self.current_iteration+=1
             #with profile(activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA], with_stack=True, experimental_config=torch._C._profiler._ExperimentalConfig(verbose=True),) as prof:
@@ -1896,6 +1931,13 @@ class GPUModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
             logprobs_lists = logprobs_tensors.tolists() \
                 if logprobs_tensors is not None else None
 
+
+            # timing
+            # iteration time using cuda events
+            self.decode_end_time.record(stream=current_stream)
+            self.decode_end_time.synchronize()
+            self.decode_iteration_time = self.decode_start_time.elapsed_time(self.decode_end_time)
+
             # Compute prompt logprobs if needed.
             prompt_logprobs_dict = self._get_prompt_logprobs_dict(
                 hidden_states[:num_scheduled_tokens],
@@ -1974,6 +2016,11 @@ class GPUModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
             # discard_sampled_tokens_req_indices = []
             #self.def_stream.wait_event(sync_event)
             current_stream.synchronize()
+            # timing
+            # iteration time using cuda events
+            self.prefill_end_time.record(stream=current_stream)
+            self.prefill_end_time.synchronize()
+            self.prefill_iteration_time = self.prefill_start_time.elapsed_time(self.prefill_end_time)
             self.prefill_events.append(sync_event)
             valid_sampled_token_ids=[]
             logprobs_lists=[]
@@ -2147,7 +2194,28 @@ class GPUModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
         #    prof.export_chrome_trace("external_trace_syncevent"+str(self.record_iteration)+str(torch.cuda.current_device())+".json")
         #     logger.info("recording iteration")
         #     torch.cuda.memory._dump_snapshot("/workspace/torch_snapshot"+str(self.record_iteration)+str(torch.cuda.current_device())+".pkl")
-
+            # torch.cuda.memory._dump_snapshot("/workspace/torch_snapshot"+str(self.record_iteration)+str(torch.cuda.current_device())+".pkl")
+            
+        #timing
+        iteration_time = self.prefill_iteration_time if str(self.kv_transfer_config.kv_role)=="kv_consumer" else self.decode_iteration_time
+        
+        self.iteration_log.info(
+            "iter",
+            extra={
+                "payload": {
+                    "kv_role": str(self.kv_transfer_config.kv_role),
+                    "iteration_time_ms": float(iteration_time),
+                    "scheduled_tokens": scheduled_tokens,
+                    "scheduled_running_req": scheduled_running_req,
+                    "scheduled_waiting_req": scheduled_waiting_req,
+                    # "scheduled_this_iter": scheduler_output.num_scheduled_tokens,
+                    "total_tokens": scheduler_output.total_num_scheduled_tokens,
+                    # "computed_tokens": scheduler_output.num_computed_tokens,
+                    # "remaining_tokens": scheduler_output.num_tokens - scheduler_output.num_computed_tokens,
+                    "cu_mask_int":cu_mask_int,
+                }
+            },
+        )
         return ModelRunnerOutput(
             req_ids=self.input_batch.req_ids,
             req_id_to_index=self.input_batch.req_id_to_index,
@@ -3741,3 +3809,87 @@ class GPUModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
         self.transfer_event.record()
         self.transfer_event.synchronize()
         return pinned.tolist()
+
+        return pinned.tolist()
+import atexit
+import json
+import logging
+import os
+import threading
+from queue import Queue
+from logging.handlers import QueueHandler, QueueListener
+
+def setup_async_jsonl_logger(
+    name: str,
+    log_dir: str,
+    filename: str,
+    level: int = logging.INFO,
+    queue_maxsize: int = 200000,
+):
+    """
+    Returns (logger, listener). You MUST stop the listener at shutdown.
+
+    Writes JSONL to: os.path.join(log_dir, filename)
+    """
+    os.makedirs(log_dir, exist_ok=True)
+    path = os.path.join(log_dir, filename)
+
+    logger = logging.getLogger(name)
+    logger.setLevel(level)
+    logger.propagate = False  # not directed to root vLLM logs
+
+    if getattr(logger, "_async_jsonl_ready", False):
+        return logger, getattr(logger, "_async_jsonl_listener")
+
+    # Bounded queue protects memory; when full, your producer will block briefly.
+    # If you prefer dropping instead of blocking, see "DroppingQueueHandler" below.
+    q: Queue = Queue(maxsize=queue_maxsize)
+
+    qh = QueueHandler(q)
+    qh.setLevel(level)
+
+    # JSONL file handler
+    fh = logging.FileHandler(path, mode="w")
+    fh.setLevel(level)
+
+    class JsonlFormatter(logging.Formatter):
+        def format(self, record: logging.LogRecord) -> str:
+            # record.msg is already a dict or string. We standardize output.
+            payload = {
+                "ts": record.created,
+                "level": record.levelname,
+                "name": record.name,
+            }
+            # If user logged dict via extra={"payload": {...}}
+            if hasattr(record, "payload"):
+                payload.update(record.payload)
+            else:
+                payload["message"] = record.getMessage()
+            return json.dumps(payload, ensure_ascii=False)
+
+    fh.setFormatter(JsonlFormatter())
+
+    listener = QueueListener(q, fh, respect_handler_level=True)
+    listener.daemon = True
+    listener.start()
+
+    logger.addHandler(qh)
+
+    # Mark as initialized
+    logger._async_jsonl_ready = True
+    logger._async_jsonl_listener = listener
+    logger._async_jsonl_path = path
+
+    # Best-effort stop at process exit
+    def _stop():
+        try:
+            listener.stop()
+            try:
+                fh.flush()
+            except Exception:
+                pass
+        except Exception:
+            pass
+
+    atexit.register(_stop)
+    return logger, listener

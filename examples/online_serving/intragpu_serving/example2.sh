@@ -265,11 +265,12 @@ main() {
     #     --num-prompts 1024 --burstiness 100 --request-rate 50 --ignore-eos | tee benchmark.log
     
     # echo "Benchmarking done. Cleaning up..."
+    qps=25
 
     vllm bench serve --port 10003 --seed $(date +%s) \
        --model $MODEL \
        --dataset-name custom --dataset-path /workspace/lmsys_custom_prompts_10k.jsonl --custom-skip-chat-template \
-       --num-prompts 10000 --burstiness 500 --request-rate 25 --goodput tpot:100 --save-result --save-detailed --result-dir /workspace/results --result-filename llama_lmsys_qps25_bothtorch_test.json | tee benchmark_lmsys.log    
+       --num-prompts 10000 --request-rate $qps --goodput tpot:100 --save-result --save-detailed --result-dir /workspace/results --result-filename llama_lmsys_qps${qps}_bothmasked_timing_test.json | tee benchmark_lmsys.log    
 
     #python3 single_serve.py --port $PROXY_PORT --model $MODEL
     #python3 multi_serve.py --port 10001 --model $MODEL
